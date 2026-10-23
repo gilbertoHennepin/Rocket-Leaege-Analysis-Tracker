@@ -87,7 +87,9 @@ class Match:
     ``ball`` has one row per sampled frame. ``cars`` is in long format, with
     one row per (frame, player), which makes per-player filtering and heat
     maps simple. Both share the ``frame`` and ``time`` columns, where ``time``
-    is seconds since the start of the replay.
+    is seconds since the start of the replay. ``phase`` is the gameplay
+    phase (``active_play``, ``kickoff_countdown``, ``post_goal``...) and
+    ``live`` is True while the ball is in play.
     """
 
     source: Path
@@ -138,7 +140,10 @@ class Match:
         i = int(np.clip(np.searchsorted(times, time), 0, len(times) - 1))
         return float(self.ball["clock"].iloc[i])
 
-    def player_frames(self, name_or_id: str) -> pd.DataFrame:
-        """Car rows for a single player."""
+    def player_frames(self, name_or_id: str, live_only: bool = False) -> pd.DataFrame:
+        """Car rows for a single player, optionally only during live play."""
         player = self.player(name_or_id)
-        return self.cars[self.cars["player_id"] == player.id].reset_index(drop=True)
+        rows = self.cars["player_id"] == player.id
+        if live_only:
+            rows &= self.cars["live"]
+        return self.cars[rows].reset_index(drop=True)
