@@ -68,7 +68,9 @@ def parse_replay(path: str | Path, fps: float = DEFAULT_FPS) -> Match:
             fps=fps,
             dtype="float32",
         )
-        events = subtr_actor.get_stats_events(str(path))["events"]
+        # The timeline carries the same event stream as get_stats_events, plus
+        # the gameplay phase of each sample, so one call gives us both.
+        timeline = subtr_actor.get_stats_timeline(str(path), frame_step_seconds=1.0 / fps)
     except Exception as exc:  # the bindings raise plain exceptions
         raise ReplayParseError(f"Could not parse {path.name}: {exc}") from exc
 
@@ -77,7 +79,9 @@ def parse_replay(path: str | Path, fps: float = DEFAULT_FPS) -> Match:
     players = _build_players(replay_meta)
     ids_by_remote = {_remote_key(p_meta): p.id for p_meta, p in zip(_player_metas(replay_meta), players, strict=True)}
 
+    events = timeline["events"]["events"]
     ball, cars = _build_frames(array, meta["column_headers"], players)
+    _add_phases(ball, cars, timeline["frames"])
     goals = _build_goals(events, headers, ids_by_remote, players)
     team_size = int(headers.get("TeamSize") or max(len(replay_meta["team_zero"]), len(replay_meta["team_one"])))
 
@@ -198,6 +202,33 @@ def _build_frames(
         cars["jumping"] = cars["jumping"] > 0.5
     cars["player_id"] = cars["player_id"].astype("category")
     return ball, cars
+
+
+# Kickoffs (cars racing to a stationary ball) are left out of "live" play:
+# they pile up at the same spots every time and are analyzed separately.
+LIVE_PHASES = frozenset({"active_play"})
+
+
+def _add_phases(ball: pd.DataFrame, cars: pd.DataFrame, timeline_frames: list[dict[str, Any]]) -> None:
+    """Tag each sampled frame with its gameplay phase and whether play is live.
+
+    Live play excludes kickoff countdowns and the pause after each goal, which
+    would otherwise pile up fake "positions" at kickoff spots and in the net.
+    """
+    if not timeline_frames:
+        ball["phase"] = "active_play"
+    else:
+        phases = pd.DataFrame(
+            {
+                "time": [float(f["time"]) for f in timeline_frames],
+                "phase": [f.get("gameplay_phase") or "unknown" for f in timeline_frames],
+            }
+        ).sort_values("time")
+        ball["phase"] = pd.merge_asof(ball[["time"]], phases, on="time", direction="nearest")["phase"].to_numpy()
+    ball["live"] = ball["phase"].isin(LIVE_PHASES)
+    by_frame = ball.set_index("frame")
+    cars["phase"] = by_frame["phase"].reindex(cars["frame"]).to_numpy()
+    cars["live"] = by_frame["live"].reindex(cars["frame"]).to_numpy()
 
 
 # Events ----------------------------------------------------------------------

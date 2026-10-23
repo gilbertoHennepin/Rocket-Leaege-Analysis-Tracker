@@ -74,3 +74,23 @@ def test_cli_parse_latest_and_export(replay_dir, tmp_path, capsys):
 def test_cli_parse_reports_errors(tmp_path, capsys):
     assert main(["parse", str(tmp_path / "missing.replay")]) == 1
     assert "not found" in capsys.readouterr().err
+
+
+def test_cli_stats(tmp_path, capsys):
+    replay = str(FIXTURES / "doubles.replay")
+    assert main(["stats", replay, "--csv", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "Time under 25 boost" in out
+    assert "Last back on team" in out
+    assert (tmp_path / "doubles-stats.csv").exists()
+
+
+def test_cli_stats_hides_team_roles_in_1v1(capsys):
+    assert main(["stats", str(FIXTURES / "duel.replay")]) == 0
+    assert "Last back" not in capsys.readouterr().out
+
+
+def test_cli_heatmap(tmp_path, capsys):
+    assert main(["heatmap", str(FIXTURES / "duel.replay"), "--out", str(tmp_path)]) == 0
+    assert "saved 5 images" in capsys.readouterr().out
+    assert (tmp_path / "duel" / "overview.png").exists()
