@@ -103,6 +103,7 @@ def parse_replay(path: str | Path, fps: float = DEFAULT_FPS) -> Match:
         boost_pickups=_build_boost_pickups(events, ids_by_remote),
         fps=fps,
         raw_events=events,
+        recorded_by=_recorder(headers, players),
     )
 
 
@@ -333,6 +334,29 @@ def _build_boost_pickups(events: list[dict[str, Any]], ids_by_remote: dict[str, 
             )
         )
     return sorted(pickups, key=lambda b: b.time)
+
+
+def _recorder(headers: dict[str, Any], players: list[Player]) -> str | None:
+    """Guess who saved the replay.
+
+    Newer replays have a ``PlayerName`` header. Auto-saved ones are named like
+    "2026-04-28.18.07 2Fum2Tastic Ranked Doubles Loss", so fall back to
+    looking for a player's name in ``ReplayName``, restricted to the team in
+    ``PrimaryPlayerTeam`` when present.
+    """
+    name = headers.get("PlayerName")
+    for p in players:
+        if name and p.name == name:
+            return p.id
+    replay_name = str(headers.get("ReplayName") or "")
+    team = headers.get("PrimaryPlayerTeam")
+    candidates = [p for p in players if team is None or int(p.team) == int(team)]
+    matches = [p for p in candidates if p.name and f" {p.name} " in f" {replay_name} "]
+    if len(matches) == 1:
+        return matches[0].id
+    if team is not None and len(candidates) == 1:  # 1v1: the recorder's team has one player
+        return candidates[0].id
+    return None
 
 
 def _parse_epoch(value: Any) -> datetime | None:

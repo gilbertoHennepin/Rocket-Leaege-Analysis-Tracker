@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
+import textwrap
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
 from . import __version__
+from .coach import Report, coach, report_to_dict
 from .discovery import REPLAY_DIR_ENV, default_replay_dir, find_replays
 from .export import export_match
-from .models import Match, Team
+from .models import Match, Player, Team
+from .moments import Moment
 from .parser import DEFAULT_FPS, ReplayParseError, parse_replay
 from .stats import player_stats, stats_table
 
@@ -19,6 +24,11 @@ from .stats import player_stats, stats_table
 def _format_clock(seconds: float) -> str:
     minutes, secs = divmod(int(round(seconds)), 60)
     return f"{minutes}:{secs:02d}"
+
+
+def _when(match: Match, time: float) -> str:
+    label = match.game_time_label(time)
+    return label if label == "OT" else f"{label} left"
 
 
 def format_match(match: Match) -> str:
@@ -46,8 +56,7 @@ def format_match(match: Match) -> str:
             scorer = names.get(g.scorer_id or "", "unknown")
             # Ball speed is in uu/s, and 1 uu is 1 cm.
             lines.append(
-                f"    {_format_clock(match.clock_at(g.time))} left  {g.team.label:<7} {scorer}"
-                f"  ({g.ball_speed * 0.036:.0f} km/h)"
+                f"    {_when(match, g.time):>9}  {g.team.label:<7} {scorer}  ({g.ball_speed * 0.036:.0f} km/h)"
             )
     return "\n".join(lines)
 
@@ -185,6 +194,75 @@ def _cmd_heatmap(args: argparse.Namespace) -> int:
     return _run_per_match(args, handle)
 
 
+PLAYER_ENV = "RLTRACKER_PLAYER"
+
+
+def _pick_players(match: Match, args: argparse.Namespace) -> list[Player]:
+    """Who to coach: --all, --player, $RLTRACKER_PLAYER, the replay's owner, or everyone."""
+    if args.all:
+        return list(match.players)
+    for name in (args.player, os.environ.get(PLAYER_ENV)):
+        if name:
+            try:
+                return [match.player(name)]
+            except KeyError:
+                if name == args.player:
+                    print(f"  ({name!r} isn't in this match, showing everyone)")
+                    return list(match.players)
+    if match.recorded_by:
+        return [match.player(match.recorded_by)]
+    return list(match.players)
+
+
+def _format_moment(match: Match, moment: Moment) -> str:
+    clock = match.game_time_label(moment.time)
+    # Conceded goals and shots you were caught ahead for are punished by definition.
+    show = moment.punished and moment.kind not in ("conceded", "caught_ahead")
+    return f"{clock} (punished)" if show else clock
+
+
+def format_report(match: Match, report: Report) -> str:
+    p = report.player
+    lines = [f"Coaching report: {p.name} ({p.team.label})", ""]
+    if report.insights:
+        lines.append("  What to work on")
+        for n, insight in enumerate(report.insights, 1):
+            lines.append(f"  {n}. [{insight.severity.label.upper()}] {insight.title}")
+            lines += [f"     {line}" for line in textwrap.wrap(insight.message, 88)]
+            lines += [f"     {line}" for line in textwrap.wrap("Tip: " + insight.tip, 88)]
+            if insight.moments:
+                shown = insight.moments[:6]
+                when = ", ".join(_format_moment(match, m) for m in shown)
+                more = f" and {len(insight.moments) - len(shown)} more" if len(insight.moments) > len(shown) else ""
+                lines += [f"     {line}" for line in textwrap.wrap(f"When (clock): {when}{more}", 88)]
+            lines.append("")
+    else:
+        lines += ["  Nothing major to fix in this match. Nice game.", ""]
+    if report.strengths:
+        lines.append("  Strengths")
+        lines += [f"  + {s.title}: {s.message}" for s in report.strengths]
+    return "\n".join(lines)
+
+
+def _cmd_coach(args: argparse.Namespace) -> int:
+    def handle(match: Match) -> None:
+        reports = coach(match)
+        blue, orange = match.score[Team.BLUE], match.score[Team.ORANGE]
+        print(f"{match.source.name}  ·  {match.mode} {match.playlist or ''}  ·  Blue {blue} - {orange} Orange\n")
+        players = _pick_players(match, args)
+        for player in players:
+            print(format_report(match, reports[player.id]))
+            print()
+        if args.json:
+            out = Path(args.json) / f"{match.source.stem}-coaching.json"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            data = [report_to_dict(match, reports[p.id]) for p in match.players]
+            out.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            print(f"  Saved {out}")
+
+    return _run_per_match(args, handle)
+
+
 def _add_replay_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("replays", nargs="*", help="Replay files. Defaults to your most recent replay.")
     parser.add_argument("--dir", type=Path, help="Replay folder to pick the latest replays from")
@@ -212,6 +290,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_replay_args(p_stats)
     p_stats.add_argument("--csv", type=Path, help="Also save the stats as CSV in this folder")
     p_stats.set_defaults(func=_cmd_stats)
+
+    p_coach = sub.add_parser("coach", help="Coaching tips: what to work on, with timestamps")
+    _add_replay_args(p_coach)
+    p_coach.add_argument("--player", help=f"Who to coach (default: ${PLAYER_ENV}, else the replay's owner)")
+    p_coach.add_argument("--all", action="store_true", help="Show reports for every player")
+    p_coach.add_argument("--json", type=Path, help="Also save every player's report as JSON in this folder")
+    p_coach.set_defaults(func=_cmd_coach)
 
     p_heat = sub.add_parser("heatmap", help="Save heat maps and touch maps as PNG images")
     _add_replay_args(p_heat)
