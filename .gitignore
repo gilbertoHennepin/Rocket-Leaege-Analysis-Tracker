@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local replays and exported match data
+/replays/
+/data/
+*.parquet
+!tests/fixtures/**
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
