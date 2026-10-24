@@ -19,6 +19,7 @@ from .models import Match, Player, Team
 from .moments import Moment
 from .parser import DEFAULT_FPS, ReplayParseError, parse_replay
 from .stats import player_stats, stats_table
+from .viewer_export import export_viewer
 
 
 def _format_clock(seconds: float) -> str:
@@ -263,6 +264,14 @@ def _cmd_coach(args: argparse.Namespace) -> int:
     return _run_per_match(args, handle)
 
 
+def _cmd_viewer(args: argparse.Namespace) -> int:
+    def handle(match: Match) -> None:
+        path = export_viewer(match, args.out)
+        print(f"{match.source.name}: wrote {path} ({path.stat().st_size / 1e6:.1f} MB)")
+
+    return _run_per_match(args, handle)
+
+
 def _add_replay_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("replays", nargs="*", help="Replay files. Defaults to your most recent replay.")
     parser.add_argument("--dir", type=Path, help="Replay folder to pick the latest replays from")
@@ -297,6 +306,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_coach.add_argument("--all", action="store_true", help="Show reports for every player")
     p_coach.add_argument("--json", type=Path, help="Also save every player's report as JSON in this folder")
     p_coach.set_defaults(func=_cmd_coach)
+
+    p_view = sub.add_parser("viewer-export", help="Export matches for the Unreal 3D replay viewer")
+    _add_replay_args(p_view)
+    p_view.add_argument(
+        "--out",
+        type=Path,
+        default=Path("viewer/RLReplayViewer/Replays"),
+        help="Output folder (default: the viewer project's Replays folder)",
+    )
+    p_view.set_defaults(func=_cmd_viewer)
 
     p_heat = sub.add_parser("heatmap", help="Save heat maps and touch maps as PNG images")
     _add_replay_args(p_heat)

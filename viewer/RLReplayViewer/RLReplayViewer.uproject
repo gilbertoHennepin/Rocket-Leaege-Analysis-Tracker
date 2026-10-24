@@ -1,0 +1,13 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.5",
+	"Category": "",
+	"Description": "3D viewer for Rocket League replays analyzed with rltracker.",
+	"Modules": [
+		{
+			"Name": "RLReplayViewer",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

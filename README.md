@@ -3,7 +3,10 @@
 Turn your Rocket League replays into stats, heat maps and coaching feedback, like
 "you over-commit on defense" or "you're starving on boost". Works for 1v1, 2v2 and 3v3.
 
-> **Status:** step 3 of 4. Parsing, stats, heat maps and coaching tips are done.
+Includes a **3D replay viewer built in Unreal Engine 5 with C++** that plays
+the match back and lets you jump to each coaching moment. See [`viewer/`](viewer/README.md).
+
+> **Status:** parsing, stats, heat maps, coaching tips and the 3D viewer are done.
 > The dashboard is next (see [Roadmap](#roadmap)).
 
 ![Heat maps for a 2v2 match](docs/images/overview-2v2.png)
@@ -61,6 +64,7 @@ rltracker heatmap                   # heat maps and touch maps -> ./heatmaps/<re
 rltracker coach                     # what to work on, with timestamps
 rltracker coach --latest 5 --player "YourName"   # coach a specific player
 rltracker coach --all --json reports              # every player, saved as JSON
+rltracker viewer-export             # export your latest match for the 3D viewer
 ```
 
 `rltracker coach` tells you what to work on, ranked by severity, with the game
@@ -133,6 +137,14 @@ ball and the touch map. Player maps are always drawn with that player
 attacking to the right, so maps from blue and orange games compare directly.
 
 <img src="docs/images/player-heatmap.png" alt="Heat map for one player" width="520">
+
+### 3D replay viewer (Unreal Engine 5, C++)
+
+`rltracker viewer-export` writes a match to `viewer/RLReplayViewer/Replays/`.
+Open the Unreal project and press Play to watch it in 3D: follow any player in
+ball cam, scrub the timeline, and click a coaching moment to jump to the few
+seconds before it. Build steps, controls and the architecture are in
+[viewer/README.md](viewer/README.md).
 
 Replays are found automatically in
 `Documents\My Games\Rocket League\TAGame\Demos` (including OneDrive-redirected
@@ -230,8 +242,12 @@ src/rltracker/
   moments.py     detect double commits, lost challenges, low boost stretches...
   coach.py       coaching rules, strengths and reports
   export.py      save a Match as Parquet/CSV + match.json
+  viewer_export.py  export a Match for the 3D viewer
   cli.py         the rltracker command
 tests/           pytest suite, run against real 1v1, 2v2 and 3v3 replays
+viewer/
+  RLReplayViewer/  Unreal Engine 5 C++ project (3D replay viewer)
+  core-tests/      CMake unit tests for the viewer's engine-free playback core
 ```
 
 ## Development
@@ -242,13 +258,20 @@ ruff check .    # lint
 ruff format .   # format
 ```
 
-CI runs the tests on Windows and Linux for Python 3.10 and 3.13.
+CI runs the tests on Windows and Linux for Python 3.10 and 3.13, and builds
+and runs the viewer's C++ core tests with CMake (MSVC and GCC, warnings as errors).
+
+```bash
+cmake -S viewer/core-tests -B build/core-tests
+cmake --build build/core-tests && ctest --test-dir build/core-tests
+```
 
 ## Roadmap
 
 - [x] **1. Replay parser and data model**: parse 1v1/2v2/3v3 replays into tidy tables
 - [x] **2. Stats and heat maps**: boost usage, time starved on boost, positioning by third, car and ball heat maps
 - [x] **3. Tactical analysis**: detect over-commits, double commits, ball chasing, poor rotation, with timestamped tips
+- [x] **3D replay viewer**: Unreal Engine 5 C++ playback with cameras and a clickable coaching timeline
 - [ ] **4. Dashboard**: per-match reports and trends over many games
 
 ## Credits
