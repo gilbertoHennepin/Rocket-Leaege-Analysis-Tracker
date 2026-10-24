@@ -27,7 +27,7 @@ MIN_WHIFF_CONFIDENCE = 0.6
 
 @dataclass(frozen=True)
 class Moment:
-    kind: str  # "double_commit", "lost_challenge", "low_boost", "caught_ahead", "conceded"
+    kind: str  # "double_commit", "lost_challenge", "low_boost", "caught_ahead", "conceded", "aerial"
     player_id: str
     time: float
     duration: float = 0.0

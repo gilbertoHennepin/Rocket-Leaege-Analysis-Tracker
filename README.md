@@ -64,6 +64,8 @@ rltracker heatmap                   # heat maps and touch maps -> ./heatmaps/<re
 rltracker coach                     # what to work on, with timestamps
 rltracker coach --latest 5 --player "YourName"   # coach a specific player
 rltracker coach --all --json reports              # every player, saved as JSON
+rltracker aerials --flights         # aerials analyzed like flight test data
+rltracker aerials --cards cards     # ...plus a flight test card per aerial
 rltracker viewer-export             # export your latest match for the 3D viewer
 ```
 
@@ -137,6 +139,44 @@ ball and the touch map. Player maps are always drawn with that player
 attacking to the right, so maps from blue and orange games compare directly.
 
 <img src="docs/images/player-heatmap.png" alt="Heat map for one player" width="520">
+
+### Aerial flight analysis
+
+In the air, a Rocket League car is a small rocket: boost is a fixed-thrust
+engine along the nose (991.7 uu/s², a thrust-to-weight ratio of 1.53 against
+650 uu/s² of gravity), and air roll, pitch and yaw steer the thrust vector.
+`rltracker aerials` finds every boosted aerial and measures it the way a
+flight test or missile guidance engineer would:
+
+| Measure | What it means |
+| ------- | ------------- |
+| **Δv budget** | The velocity change the boost you burned could buy (boost / 33.3 per s × 991.7 uu/s²). |
+| **Guidance command** | The constant acceleration that carries the car from where it is to where it met the ball, at the moment it met it: the zero-effort-miss law, a = 2·ZEM / t_go². ZEM is how far you'd miss if you coasted from here. |
+| **Thrust alignment** | The mean cosine of the angle between the nose and that command while boosting. 100% means every bit of thrust pushed toward the intercept. |
+| **Cosine loss** | Boost spent on thrust that pointed somewhere else: boost × (1 − alignment). |
+| **Ballistic miss** | The ZEM at takeoff: how far the jump alone would have missed by. It shows how much of the aerial was jump and how much was engine. |
+| **Miss distance** | For aerials that never touched the ball, the closest approach. |
+
+```
+doubles.replay  (2v2, boosted aerials in live play)
+                                luhbalenci    timehake 2Fum2Tastic      Ragnar
+                                      Blue        Blue      Orange      Orange
+    Aerials                             14           8          10          11
+    Touched the ball              11 (79%)     5 (62%)     8 (80%)     7 (64%)
+    Boost per aerial                    39          21          41          37
+    Thrust alignment                   70%         72%         70%         66%
+    Boost lost to cosine loss          142          31         115         123
+    Median apex (uu)                   763         426         805         575
+    Near misses                          3           2           2           3
+```
+
+`--cards` saves a flight test card for each aerial: the trajectory in side
+view with the thrust vector at every boosting frame (colored by aim error),
+the altitude profile with boost burns, and aim error over time. Low thrust
+alignment feeds the coach ("You boost off target in the air"), and those
+aerials show up as moments in the 3D viewer.
+
+<img src="docs/images/flight-card.png" alt="Flight test card for one aerial" width="620">
 
 ### 3D replay viewer (Unreal Engine 5, C++)
 
@@ -224,6 +264,7 @@ A moment is **punished** if the opponent shot or scored within 5 seconds.
 | Ball chasing | closest to the ball 12+ points above an even split, and behind the ball under 72% (team modes) |
 | Caught ahead of the ball | 3+ opponent shots while upfield, or behind the ball under 65% |
 | Goals-against pattern | low on boost, or ahead of the ball, for most of the goals conceded |
+| Boosting off target in the air | thrust alignment under 60% and 5 points below the lobby, over 4+ aerials (see [Aerial flight analysis](#aerial-flight-analysis)) |
 | Sitting on full boost, big pad reliance, slow play, playing too deep | lower-priority habits, see `coach.py` |
 
 Strengths (good boost management, disciplined positioning, most involved
@@ -241,6 +282,9 @@ src/rltracker/
   heatmap.py     field diagram, heat maps, touch maps
   moments.py     detect double commits, lost challenges, low boost stretches...
   coach.py       coaching rules, strengths and reports
+  aerial.py      aerial detection and flight analysis (guidance, thrust alignment)
+  flightcard.py  flight test card figures
+  rotation.py    quaternions and nose vectors from the parser's Euler angles
   export.py      save a Match as Parquet/CSV + match.json
   viewer_export.py  export a Match for the 3D viewer
   cli.py         the rltracker command
@@ -271,6 +315,7 @@ cmake --build build/core-tests && ctest --test-dir build/core-tests
 - [x] **1. Replay parser and data model**: parse 1v1/2v2/3v3 replays into tidy tables
 - [x] **2. Stats and heat maps**: boost usage, time starved on boost, positioning by third, car and ball heat maps
 - [x] **3. Tactical analysis**: detect over-commits, double commits, ball chasing, poor rotation, with timestamped tips
+- [x] **Aerial flight analysis**: boosted aerials measured with guidance and flight test methods
 - [x] **3D replay viewer**: Unreal Engine 5 C++ playback with cameras and a clickable coaching timeline
 - [ ] **4. Dashboard**: per-match reports and trends over many games
 

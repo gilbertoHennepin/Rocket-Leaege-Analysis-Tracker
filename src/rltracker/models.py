@@ -62,6 +62,8 @@ class Touch:
     player_id: str
     team: Team
     ball_position: Vec3
+    # As reported by the parser's touch detector. It is occasionally another
+    # car's position, so prefer the ``cars`` table when it matters.
     player_position: Vec3
     ball_speed_change: float
     role: str | None = None
