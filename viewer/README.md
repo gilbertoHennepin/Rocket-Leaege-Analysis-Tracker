@@ -12,8 +12,9 @@ diff.
 
 ## Build and run
 
-Requirements: Windows, **Unreal Engine 5.5** (Epic Games Launcher) and
-**Visual Studio 2022** with the "Game development with C++" workload.
+Requirements: **Unreal Engine 5.5 or newer** (Epic Games Launcher), plus
+**Visual Studio 2022** with the "Game development with C++" workload on Windows,
+or **Xcode** on macOS.
 
 1. Export one or more matches from the repo root:
 
@@ -28,6 +29,8 @@ Requirements: Windows, **Unreal Engine 5.5** (Epic Games Launcher) and
 2. Right-click `viewer/RLReplayViewer/RLReplayViewer.uproject` and choose
    **Generate Visual Studio project files**. (If the menu item is missing,
    open the `.uproject` with UE 5.5 once and it will offer to build.)
+   On macOS, choose **Services > Generate Xcode Project** instead, or build
+   from Terminal (see below).
 3. Open `RLReplayViewer.sln`, set the configuration to **Development Editor**,
    and build (Ctrl+Shift+B).
 4. Open the `.uproject` and press **Play**. The newest export loads
@@ -88,8 +91,14 @@ the car's velocity.
 
 ## Status
 
-The Python export and `ReplayCore.h` are tested automatically. The Unreal
-project itself has to be compiled in UE 5.5 on Windows; it was written
-against UE 5.5 APIs but has not been built in CI, since that needs an engine
-install. If the build reports an error, open an issue with the compiler
-output.
+The Python export and `ReplayCore.h` are tested automatically in CI. The
+Unreal project has been built on macOS with UE 5.8 and Xcode; CI can't build
+it because that needs an engine install.
+
+To build from a terminal on macOS:
+
+```bash
+"/Users/Shared/Epic Games/UE_5.8/Engine/Build/BatchFiles/Mac/Build.sh" \
+  RLReplayViewerEditor Mac Development \
+  -Project="$PWD/viewer/RLReplayViewer/RLReplayViewer.uproject" -WaitMutex
+```
