@@ -3,8 +3,11 @@
 Turn your Rocket League replays into stats, heat maps and coaching feedback, like
 "you over-commit on defense" or "you're starving on boost". Works for 1v1, 2v2 and 3v3.
 
-> **Status:** step 2 of 4. Parsing, per-player stats and heat maps are done.
-> Tactical analysis and the dashboard are next (see [Roadmap](#roadmap)).
+Includes a **3D replay viewer built in Unreal Engine 5 with C++** that plays
+the match back and lets you jump to each coaching moment. See [`viewer/`](viewer/README.md).
+
+> **Status:** parsing, stats, heat maps, coaching tips and the 3D viewer are done.
+> The dashboard is next (see [Roadmap](#roadmap)).
 
 ![Heat maps for a 2v2 match](docs/images/overview-2v2.png)
 
@@ -17,9 +20,11 @@ events. This project:
 1. **Parses** replays with [subtr-actor](https://github.com/rlrml/subtr-actor), a
    fast Rust replay parser with Python bindings.
 2. **Normalizes** the output into a typed `Match` model with tidy pandas tables.
-3. **Analyzes** the match: per-player stats and heat maps, with rule-based
-   coaching tips *(coming next)*. Analysis uses live play only, so kickoff
-   countdowns and post-goal pauses don't skew the numbers.
+3. **Analyzes** the match: per-player stats, heat maps, and a rule-based
+   coaching engine that detects habits like over-committing, double
+   committing, ball chasing and boost starvation, with timestamps. Analysis
+   uses live play only, so kickoff countdowns and post-goal pauses don't skew
+   the numbers.
 
 ```
 .replay ──► subtr-actor ──► rltracker.parse_replay() ──► Match
@@ -56,7 +61,39 @@ rltracker parse --export data --format csv          # ...or as CSV
 rltracker stats                     # boost, positioning and movement stats
 rltracker stats --latest 10 --csv stats            # save as CSV too
 rltracker heatmap                   # heat maps and touch maps -> ./heatmaps/<replay>/
+rltracker coach                     # what to work on, with timestamps
+rltracker coach --latest 5 --player "YourName"   # coach a specific player
+rltracker coach --all --json reports              # every player, saved as JSON
+rltracker viewer-export             # export your latest match for the 3D viewer
 ```
+
+`rltracker coach` tells you what to work on, ranked by severity, with the game
+clock for each moment so you can jump to it in the replay viewer:
+
+```
+Coaching report: timehake (Blue)
+
+  What to work on
+  1. [HIGH] You're starving on boost
+     You spent 52% of live play under 25 boost and 26% on empty (lobby average: 39% under
+     25).
+     Tip: Path through small pads when rotating back (each is worth 12), feather boost
+     instead of holding it, and stop boosting once you're supersonic.
+     When (clock): 5:00, 4:39, 3:54, 2:35, 1:57, 1:10 and 1 more
+
+  2. [MEDIUM] You get caught ahead of the ball
+     You were upfield of the ball for 3 opponent shots.
+     Tip: Stay between the ball and your net. If you can't see the ball and your goal on
+     screen together, rotate back.
+     When (clock): 1:55, 1:50, 1:32
+
+  Strengths
+  + Strong defender: 4 saves.
+  + Finishing: 5 goals from 5 shots.
+```
+
+By default it coaches the player who saved the replay (read from the replay
+header). Set `RLTRACKER_PLAYER` to your in-game name to always pick you.
 
 ```
 doubles.replay
@@ -100,6 +137,14 @@ ball and the touch map. Player maps are always drawn with that player
 attacking to the right, so maps from blue and orange games compare directly.
 
 <img src="docs/images/player-heatmap.png" alt="Heat map for one player" width="520">
+
+### 3D replay viewer (Unreal Engine 5, C++)
+
+`rltracker viewer-export` writes a match to `viewer/RLReplayViewer/Replays/`.
+Open the Unreal project and press Play to watch it in 3D: follow any player in
+ball cam, scrub the timeline, and click a coaching moment to jump to the few
+seconds before it. Build steps, controls and the architecture are in
+[viewer/README.md](viewer/README.md).
 
 Replays are found automatically in
 `Documents\My Games\Rocket League\TAGame\Demos` (including OneDrive-redirected
@@ -155,6 +200,35 @@ All stats come from live play. Percentages are share of live time.
 | Movement | average speed, time supersonic, time on the ground, time high in the air |
 | Ball | touches, touches per minute, hard hits, aerial touches |
 
+## Coaching rules
+
+The coach first detects **moments**, then runs **rules** over each player's
+stats and moments. Each rule compares against fixed thresholds and the rest of
+the lobby, and counts are normalized to a 5 minute game.
+
+| Moment | How it's detected |
+| ------ | ----------------- |
+| Double commit | Two teammates within 900 uu of the ball and driving at it (over 400 uu/s toward it) for at least 0.3 s. Charged to whoever was further away. |
+| Lost challenge | A whiff or getting beaten to the ball (from subtr-actor's detectors) while last back on your team. In 1v1, any lost challenge. |
+| Low boost stretch | 8+ seconds of live play in a row under 25 boost. |
+| Caught ahead | An opponent shot taken while you were 300+ uu upfield of the ball. |
+| Goal conceded | Your boost and position at the moment of the shot that scored. |
+
+A moment is **punished** if the opponent shot or scored within 5 seconds.
+
+| Rule | Fires when |
+| ---- | ---------- |
+| Starving on boost | 40%+ of live play under 25 boost (high at 50%+) |
+| Over-committing | 3+ lost last-man challenges per 5 min, or 2+ that got punished |
+| Double committing | 4+ double commits per 5 min, or 2+ that got punished (team modes) |
+| Ball chasing | closest to the ball 12+ points above an even split, and behind the ball under 72% (team modes) |
+| Caught ahead of the ball | 3+ opponent shots while upfield, or behind the ball under 65% |
+| Goals-against pattern | low on boost, or ahead of the ball, for most of the goals conceded |
+| Sitting on full boost, big pad reliance, slow play, playing too deep | lower-priority habits, see `coach.py` |
+
+Strengths (good boost management, disciplined positioning, most involved
+player, and so on) are reported too, so the feedback isn't all negative.
+
 ## Project layout
 
 ```
@@ -165,9 +239,15 @@ src/rltracker/
   discovery.py   find replay folders and files
   stats.py       per-player stats from live play
   heatmap.py     field diagram, heat maps, touch maps
+  moments.py     detect double commits, lost challenges, low boost stretches...
+  coach.py       coaching rules, strengths and reports
   export.py      save a Match as Parquet/CSV + match.json
+  viewer_export.py  export a Match for the 3D viewer
   cli.py         the rltracker command
 tests/           pytest suite, run against real 1v1, 2v2 and 3v3 replays
+viewer/
+  RLReplayViewer/  Unreal Engine 5 C++ project (3D replay viewer)
+  core-tests/      CMake unit tests for the viewer's engine-free playback core
 ```
 
 ## Development
@@ -178,13 +258,20 @@ ruff check .    # lint
 ruff format .   # format
 ```
 
-CI runs the tests on Windows and Linux for Python 3.10 and 3.13.
+CI runs the tests on Windows and Linux for Python 3.10 and 3.13, and builds
+and runs the viewer's C++ core tests with CMake (MSVC and GCC, warnings as errors).
+
+```bash
+cmake -S viewer/core-tests -B build/core-tests
+cmake --build build/core-tests && ctest --test-dir build/core-tests
+```
 
 ## Roadmap
 
 - [x] **1. Replay parser and data model**: parse 1v1/2v2/3v3 replays into tidy tables
 - [x] **2. Stats and heat maps**: boost usage, time starved on boost, positioning by third, car and ball heat maps
-- [ ] **3. Tactical analysis**: detect over-commits, double commits, ball chasing, poor rotation, with timestamped tips
+- [x] **3. Tactical analysis**: detect over-commits, double commits, ball chasing, poor rotation, with timestamped tips
+- [x] **3D replay viewer**: Unreal Engine 5 C++ playback with cameras and a clickable coaching timeline
 - [ ] **4. Dashboard**: per-match reports and trends over many games
 
 ## Credits

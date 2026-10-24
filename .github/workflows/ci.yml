@@ -22,3 +22,17 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -q
+
+  viewer-core:
+    # The Unreal viewer's playback math is engine-free, so it is tested here
+    # with plain CMake. The Unreal project itself is built locally in UE 5.5.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S viewer/core-tests -B build/core-tests
+      - run: cmake --build build/core-tests --config Release
+      - run: ctest --test-dir build/core-tests -C Release --output-on-failure

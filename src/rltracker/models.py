@@ -108,6 +108,8 @@ class Match:
     # The full analysis event stream from subtr-actor (rotation roles,
     # possession, 50/50s and so on), kept for the analysis steps.
     raw_events: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    # Id of the player whose game saved this replay, when it can be told.
+    recorded_by: str | None = None
 
     @property
     def mode(self) -> str:
@@ -139,6 +141,14 @@ class Match:
         times = self.ball["time"].to_numpy()
         i = int(np.clip(np.searchsorted(times, time), 0, len(times) - 1))
         return float(self.ball["clock"].iloc[i])
+
+    def game_time_label(self, time: float) -> str:
+        """Game clock at ``time`` as shown in game, like "3:41", or "OT" in overtime."""
+        clock = self.clock_at(time)
+        if clock <= 0:
+            return "OT"
+        minutes, seconds = divmod(int(round(clock)), 60)
+        return f"{minutes}:{seconds:02d}"
 
     def player_frames(self, name_or_id: str, live_only: bool = False) -> pd.DataFrame:
         """Car rows for a single player, optionally only during live play."""
