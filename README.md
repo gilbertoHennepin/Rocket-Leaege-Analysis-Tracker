@@ -3,11 +3,24 @@
 Turn your Rocket League replays into stats, heat maps and coaching feedback, like
 "you over-commit on defense" or "you're starving on boost". Works for 1v1, 2v2 and 3v3.
 
-Includes a **3D replay viewer built in Unreal Engine 5 with C++** that plays
-the match back and lets you jump to each coaching moment. See [`viewer/`](viewer/README.md).
+**Highlights**
 
-> **Status:** parsing, stats, heat maps, coaching tips and the 3D viewer are done.
-> The dashboard is next (see [Roadmap](#roadmap)).
+- **3D replay viewer in Unreal Engine 5 (C++).** Plays a match back in a
+  to-scale arena with ball cam, orbit and top-down cameras, and a clickable
+  coaching timeline. The arena and UI are built entirely in code. The engine-free core is unit tested in CI.
+  [viewer/](viewer/README.md)
+- **Live telemetry over UDP.** `rltracker stream` sends a match in real time
+  over a small binary protocol, and the viewer plays it as it arrives. It
+  measures loss and RFC 3550 jitter, drops stale packets, and smooths playback
+  with an adaptive jitter buffer. [docs/telemetry.md](docs/telemetry.md)
+- **Aerial flight analysis.** Boosted aerials are treated like flight test
+  data: a zero-effort-miss guidance command, thrust alignment and
+  delta-v, with a flight test card for each. [Aerials](#aerial-flight-analysis)
+- **Accessible session dashboard.** One HTML page that answers "what should I
+  work on next?" It was designed with HCI principles and checked against WCAG 2.2 AA, with automated tests and
+  an axe audit. [docs/hci.md](docs/hci.md)
+
+![The viewer jumping between coaching moments](docs/images/viewer-demo.gif)
 
 ![Heat maps for a 2v2 match](docs/images/overview-2v2.png)
 
@@ -67,6 +80,8 @@ rltracker coach --all --json reports              # every player, saved as JSON
 rltracker aerials --flights         # aerials analyzed like flight test data
 rltracker aerials --cards cards     # ...plus a flight test card per aerial
 rltracker viewer-export             # export your latest match for the 3D viewer
+rltracker dashboard                 # session review page for your last 10 matches
+rltracker stream                    # stream your latest match live to the viewer (-Live)
 ```
 
 `rltracker coach` tells you what to work on, ranked by severity, with the game
@@ -178,6 +193,18 @@ aerials show up as moments in the 3D viewer.
 
 <img src="docs/images/flight-card.png" alt="Flight test card for one aerial" width="620">
 
+### Session dashboard
+
+`rltracker dashboard` writes `rltracker-dashboard.html`, a single page you can
+open offline or share. It shows up to three things to work on next (ranked by
+how many of your matches they showed up in), what you do well, a trend chart per stat
+against the lobby average, and a section per match with every tip, its game
+clock times and a heat map. It works with a keyboard and a screen reader, in
+light and dark mode, and on a phone. The design and how it's tested are in
+[docs/hci.md](docs/hci.md).
+
+<img src="docs/images/dashboard.png" alt="Session dashboard: three focus areas, strengths and trend charts" width="720">
+
 ### 3D replay viewer (Unreal Engine 5, C++)
 
 `rltracker viewer-export` writes a match to `viewer/RLReplayViewer/Replays/`.
@@ -185,8 +212,6 @@ Open the Unreal project and press Play to watch it in 3D: follow any player in
 ball cam, scrub the timeline, and click a coaching moment to jump to the few
 seconds before it. Build steps, controls and the architecture are in
 [viewer/README.md](viewer/README.md).
-
-![The viewer jumping between coaching moments](docs/images/viewer-demo.gif)
 
 | Orbit | Ball cam | Top down |
 |---|---|---|
@@ -206,6 +231,8 @@ smooths playback with an adaptive jitter buffer; goals and coaching moments
 are made reliable by repetition. `--drop`, `--duplicate` and `--jitter-ms`
 simulate a bad network to show it coping. The protocol and the design are in
 [docs/telemetry.md](docs/telemetry.md).
+
+<img src="docs/images/viewer-live.png" alt="The viewer following a live stream, with packet rate, loss, jitter and buffer depth under the score" width="720">
 
 ```
 rltracker stream --speed 2 --jitter-ms 40 --drop 0.05
@@ -310,6 +337,7 @@ src/rltracker/
   export.py      save a Match as Parquet/CSV + match.json
   viewer_export.py  export a Match for the 3D viewer
   telemetry.py   live UDP telemetry: the RLT1 protocol, sender and listener
+  dashboard.py   the session review page (single-file accessible HTML)
   cli.py         the rltracker command
 tests/           pytest suite, run against real 1v1, 2v2 and 3v3 replays
 viewer/
@@ -341,7 +369,7 @@ cmake --build build/core-tests && ctest --test-dir build/core-tests
 - [x] **Aerial flight analysis**: boosted aerials measured with guidance and flight test methods
 - [x] **3D replay viewer**: Unreal Engine 5 C++ playback with cameras and a clickable coaching timeline
 - [x] **Live telemetry**: stream a match over UDP into the viewer, with loss, jitter and a playout buffer
-- [ ] **4. Dashboard**: per-match reports and trends over many games
+- [x] **4. Dashboard**: an accessible session review page with focus areas, trends and per-match reports
 
 ## Credits
 

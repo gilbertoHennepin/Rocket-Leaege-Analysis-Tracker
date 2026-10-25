@@ -34,6 +34,13 @@ class Moment:
     punished: bool = False  # the opponent got a shot or goal soon after
     detail: str = ""
 
+    def label(self, match: Match) -> str:
+        """Game clock when it happened, like "3:41", with "(punished)" when the opponent made it count."""
+        clock = match.game_time_label(self.time)
+        # Conceded goals and shots you were caught ahead for are punished by definition.
+        show = self.punished and self.kind not in ("conceded", "caught_ahead")
+        return f"{clock} (punished)" if show else clock
+
 
 def _remote(match: Match) -> dict[str, str]:
     """subtr-actor remote id repr -> our player id, built from the touch stream."""
