@@ -35,6 +35,9 @@ public:
 	void FocusPlayer(int32 Index);
 	void ClearFocus();
 
+	// Place the orbit camera (degrees, and distance from the ball in uu).
+	void SetOrbit(double YawDeg, double PitchDeg, double Distance);
+
 	// Toggled with H; the HUD reads this.
 	bool IsHudVisible() const { return bHudVisible; }
 
@@ -52,10 +55,7 @@ private:
 	void ToggleHud() { bHudVisible = !bHudVisible; }
 	void ZoomIn();
 	void ZoomOut();
-	void OrbitLeft(float Value);
-	void OrbitRight(float Value);
-	void OrbitUp(float Value);
-	void OrbitDown(float Value);
+	void PollOrbitKeys(float DeltaSeconds);
 	void MouseX(float Value);
 	void MouseY(float Value);
 
@@ -67,8 +67,8 @@ private:
 	bool bHudVisible = true;
 
 	double OrbitYawDeg = -90.0;  // start behind the blue goal
-	double OrbitPitchDeg = 28.0;
-	double OrbitDistance = 3200.0;
+	double OrbitPitchDeg = 34.0;
+	double OrbitDistance = 4200.0;
 
 	// Smoothed camera target, so cuts between moments don't jolt the view.
 	FVector SmoothedLocation = FVector::ZeroVector;

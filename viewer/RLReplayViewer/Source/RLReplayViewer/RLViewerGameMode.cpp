@@ -57,10 +57,11 @@ void ARLViewerGameMode::BeginPlay()
 		Pawn->SetDirector(Director);
 	}
 
-	// A file passed on the command line (-Replay="C:/path/match.rlview.json")
-	// wins; otherwise open the newest export in the Replays folder.
+	// A file passed on the command line (-RLReplay="C:/path/match.rlview.json")
+	// wins; otherwise open the newest export in the Replays folder. (Not
+	// -Replay=, which Unreal takes for its own replay system.)
 	FString Path;
-	if (!FParse::Value(FCommandLine::Get(), TEXT("Replay="), Path))
+	if (!FParse::Value(FCommandLine::Get(), TEXT("RLReplay="), Path))
 	{
 		const TArray<FString> Files = FindReplayFiles();
 		if (Files.Num() > 0)

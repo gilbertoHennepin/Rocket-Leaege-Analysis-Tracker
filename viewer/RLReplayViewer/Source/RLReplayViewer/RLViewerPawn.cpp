@@ -76,6 +76,7 @@ FText ARLViewerPawn::GetCameraModeText() const
 void ARLViewerPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	PollOrbitKeys(DeltaSeconds);
 	if (!Director.IsValid() || !Director->HasReplay())
 	{
 		return;
@@ -93,13 +94,17 @@ void ARLViewerPawn::Tick(float DeltaSeconds)
 	case ERLCameraMode::TopDown:
 		// High enough to fit the whole field with this FOV; yaw so goals are left and right.
 		Pose.LookAt = {0.0, 0.0, 0.0};
-		Pose.Location = {-1.0, 0.0, 7600.0};
+		Pose.Location = {-1.0, 0.0, 8600.0};
 		break;
 	default:
 		Pose = rlcore::Orbit(Ball, OrbitYawDeg, OrbitPitchDeg, OrbitDistance);
 		break;
 	}
 
+	if (Mode != ERLCameraMode::TopDown)
+	{
+		Pose.Location = rlcore::ClampToArena(Pose.Location);  // never behind a wall
+	}
 	const FVector TargetLocation = ToFVector(Pose.Location);
 	const FVector TargetLookAt = ToFVector(Pose.LookAt);
 	if (!bHasSmoothed)
@@ -157,10 +162,6 @@ void ARLViewerPawn::SetupPlayerInputComponent(UInputComponent* Input)
 	// Orbit: hold the right mouse button and drag, or use A/D and W/S.
 	Input->BindAxisKey(EKeys::MouseX, this, &ARLViewerPawn::MouseX);
 	Input->BindAxisKey(EKeys::MouseY, this, &ARLViewerPawn::MouseY);
-	Input->BindAxisKey(EKeys::A, this, &ARLViewerPawn::OrbitLeft);
-	Input->BindAxisKey(EKeys::D, this, &ARLViewerPawn::OrbitRight);
-	Input->BindAxisKey(EKeys::W, this, &ARLViewerPawn::OrbitUp);
-	Input->BindAxisKey(EKeys::S, this, &ARLViewerPawn::OrbitDown);
 }
 
 void ARLViewerPawn::TogglePlay()
@@ -247,25 +248,26 @@ void ARLViewerPawn::ZoomOut()
 	OrbitDistance = FMath::Clamp(OrbitDistance / 0.85, MinOrbitDistance, MaxOrbitDistance);
 }
 
-// Key axes read 1 while the key is held, so these rotate at a steady rate.
-void ARLViewerPawn::OrbitLeft(float Value)
+// A/D and W/S orbit at a steady rate while held. They are read here rather
+// than bound as axes: keyboard keys aren't 1D axes, and binding them as one
+// trips an engine check.
+void ARLViewerPawn::PollOrbitKeys(float DeltaSeconds)
 {
-	OrbitYawDeg -= Value * 90.0 * GetWorld()->GetDeltaSeconds();
+	const APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+	auto Held = [PC](const FKey& Key) { return PC->IsInputKeyDown(Key) ? 1.0 : 0.0; };
+	OrbitYawDeg += (Held(EKeys::D) - Held(EKeys::A)) * 90.0 * DeltaSeconds;
+	OrbitPitchDeg = FMath::Clamp(OrbitPitchDeg + (Held(EKeys::W) - Held(EKeys::S)) * 45.0 * DeltaSeconds, 5.0, 89.0);
 }
 
-void ARLViewerPawn::OrbitRight(float Value)
+void ARLViewerPawn::SetOrbit(double YawDeg, double PitchDeg, double Distance)
 {
-	OrbitYawDeg += Value * 90.0 * GetWorld()->GetDeltaSeconds();
-}
-
-void ARLViewerPawn::OrbitUp(float Value)
-{
-	OrbitPitchDeg = FMath::Clamp(OrbitPitchDeg + Value * 45.0 * GetWorld()->GetDeltaSeconds(), 5.0, 89.0);
-}
-
-void ARLViewerPawn::OrbitDown(float Value)
-{
-	OrbitPitchDeg = FMath::Clamp(OrbitPitchDeg - Value * 45.0 * GetWorld()->GetDeltaSeconds(), 5.0, 89.0);
+	OrbitYawDeg = YawDeg;
+	OrbitPitchDeg = FMath::Clamp(PitchDeg, 5.0, 89.0);
+	OrbitDistance = FMath::Clamp(Distance, MinOrbitDistance, MaxOrbitDistance);
 }
 
 void ARLViewerPawn::MouseX(float Value)
