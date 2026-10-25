@@ -1,5 +1,6 @@
 #include "RLReplayData.h"
 
+#include "Algo/BinarySearch.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonReader.h"
@@ -47,6 +48,82 @@ bool Fail(FString& OutError, const FString& Message)
 	OutError = Message;
 	return false;
 }
+
+TSharedPtr<FJsonObject> ParseObject(const FString& Json)
+{
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	return FJsonSerializer::Deserialize(Reader, Root) ? Root : nullptr;
+}
+
+bool ReadPlayers(const TSharedPtr<FJsonObject>& Root, TArray<FRLPlayerInfo>& Out, FString& OutError)
+{
+	const FJsonArray* Players = nullptr;
+	if (!Root->TryGetArrayField(TEXT("players"), Players))
+	{
+		return Fail(OutError, TEXT("Missing players"));
+	}
+	for (const TSharedPtr<FJsonValue>& Value : *Players)
+	{
+		const TSharedPtr<FJsonObject> P = Value.IsValid() ? Value->AsObject() : nullptr;
+		if (!P.IsValid())
+		{
+			return Fail(OutError, TEXT("Bad player entry"));
+		}
+		FRLPlayerInfo& Info = Out.AddDefaulted_GetRef();
+		Info.Id = StringOr(P, TEXT("id"));
+		Info.Name = StringOr(P, TEXT("name"), TEXT("Player"));
+		Info.Team = static_cast<int32>(NumberOr(P, TEXT("team"))) == 1 ? 1 : 0;
+		Info.Car = StringOr(P, TEXT("car"));
+	}
+	return true;
+}
+
+void ReadMatchDetails(const TSharedPtr<FJsonObject>& Root, FRLReplay& R)
+{
+	R.Source = StringOr(Root, TEXT("source"));
+	R.Mode = StringOr(Root, TEXT("mode"));
+	R.Playlist = StringOr(Root, TEXT("playlist"));
+	R.RecordedBy = StringOr(Root, TEXT("recordedBy"));
+	R.Fps = FMath::Clamp(NumberOr(Root, TEXT("fps"), 10.0), 1.0, 120.0);
+	const TSharedPtr<FJsonObject>* Score = nullptr;
+	if (Root->TryGetObjectField(TEXT("score"), Score))
+	{
+		R.BlueScore = static_cast<int32>(NumberOr(*Score, TEXT("blue")));
+		R.OrangeScore = static_cast<int32>(NumberOr(*Score, TEXT("orange")));
+	}
+}
+
+FRLGoal ReadGoal(const TSharedPtr<FJsonObject>& G)
+{
+	FRLGoal Goal;
+	Goal.Time = NumberOr(G, TEXT("time"));
+	Goal.Team = static_cast<int32>(NumberOr(G, TEXT("team"))) == 1 ? 1 : 0;
+	Goal.ScorerId = StringOr(G, TEXT("scorerId"));
+	Goal.Clock = StringOr(G, TEXT("clock"));
+	const TSharedPtr<FJsonObject>* Score = nullptr;
+	if (G->TryGetObjectField(TEXT("score"), Score))
+	{
+		Goal.ScoreAfter[0] = static_cast<int32>(NumberOr(*Score, TEXT("blue")));
+		Goal.ScoreAfter[1] = static_cast<int32>(NumberOr(*Score, TEXT("orange")));
+	}
+	return Goal;
+}
+
+FRLMoment ReadMoment(const TSharedPtr<FJsonObject>& M)
+{
+	FRLMoment Moment;
+	Moment.Time = NumberOr(M, TEXT("time"));
+	Moment.Clock = StringOr(M, TEXT("clock"));
+	Moment.PlayerId = StringOr(M, TEXT("playerId"));
+	Moment.Kind = StringOr(M, TEXT("kind"));
+	Moment.Rule = StringOr(M, TEXT("rule"));
+	Moment.Title = StringOr(M, TEXT("title"));
+	Moment.Severity = StringOr(M, TEXT("severity"), TEXT("low"));
+	Moment.Detail = StringOr(M, TEXT("detail"));
+	M->TryGetBoolField(TEXT("punished"), Moment.bPunished);
+	return Moment;
+}
 }  // namespace
 
 int32 FRLReplay::FindPlayer(const FString& Id) const
@@ -62,6 +139,33 @@ double FRLReplay::ClockAt(double Time) const
 	}
 	const rlcore::SamplePoint S = rlcore::FindSample(Times, Time);
 	return Clock[S.Alpha < 0.5 ? S.Index0 : S.Index1];
+}
+
+int32 FRLReplay::ScoreAt(double Time, int32 Team) const
+{
+	const int32 T = Team == 1 ? 1 : 0;
+	int32 Score = StartScore[T];
+	for (const FRLGoal& Goal : Goals)
+	{
+		if (Goal.Time > Time)
+		{
+			break;
+		}
+		Score = Goal.ScoreAfter[T];
+	}
+	return Score;
+}
+
+void FRLReplay::AddGoal(const FRLGoal& Goal)
+{
+	const int32 At = Algo::UpperBoundBy(Goals, Goal.Time, &FRLGoal::Time);
+	Goals.Insert(Goal, At);
+}
+
+void FRLReplay::AddMoment(const FRLMoment& Moment)
+{
+	const int32 At = Algo::UpperBoundBy(Moments, Moment.Time, &FRLMoment::Time);
+	Moments.Insert(Moment, At);
 }
 
 std::vector<double> FRLReplay::MomentTimes() const
@@ -87,9 +191,8 @@ bool FRLReplay::LoadFromFile(const FString& Path, FRLReplay& Out, FString& OutEr
 
 bool FRLReplay::LoadFromString(const FString& Json, FRLReplay& Out, FString& OutError)
 {
-	TSharedPtr<FJsonObject> Root;
-	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	const TSharedPtr<FJsonObject> Root = ParseObject(Json);
+	if (!Root.IsValid())
 	{
 		return Fail(OutError, TEXT("Not valid JSON"));
 	}
@@ -104,36 +207,10 @@ bool FRLReplay::LoadFromString(const FString& Json, FRLReplay& Out, FString& Out
 	}
 
 	FRLReplay R;
-	R.Source = StringOr(Root, TEXT("source"));
-	R.Mode = StringOr(Root, TEXT("mode"));
-	R.Playlist = StringOr(Root, TEXT("playlist"));
-	R.RecordedBy = StringOr(Root, TEXT("recordedBy"));
-	R.Fps = NumberOr(Root, TEXT("fps"), 10.0);
-
-	const TSharedPtr<FJsonObject>* Score = nullptr;
-	if (Root->TryGetObjectField(TEXT("score"), Score))
+	ReadMatchDetails(Root, R);
+	if (!ReadPlayers(Root, R.Players, OutError))
 	{
-		R.BlueScore = static_cast<int32>(NumberOr(*Score, TEXT("blue")));
-		R.OrangeScore = static_cast<int32>(NumberOr(*Score, TEXT("orange")));
-	}
-
-	const FJsonArray* Players = nullptr;
-	if (!Root->TryGetArrayField(TEXT("players"), Players))
-	{
-		return Fail(OutError, TEXT("Missing players"));
-	}
-	for (const TSharedPtr<FJsonValue>& Value : *Players)
-	{
-		const TSharedPtr<FJsonObject> P = Value->AsObject();
-		if (!P.IsValid())
-		{
-			return Fail(OutError, TEXT("Bad player entry"));
-		}
-		FRLPlayerInfo& Info = R.Players.AddDefaulted_GetRef();
-		Info.Id = StringOr(P, TEXT("id"));
-		Info.Name = StringOr(P, TEXT("name"), TEXT("Player"));
-		Info.Team = static_cast<int32>(NumberOr(P, TEXT("team")));
-		Info.Car = StringOr(P, TEXT("car"));
+		return false;
 	}
 
 	const TSharedPtr<FJsonObject>* Frames = nullptr;
@@ -193,16 +270,20 @@ bool FRLReplay::LoadFromString(const FString& Json, FRLReplay& Out, FString& Out
 	{
 		for (const TSharedPtr<FJsonValue>& Value : *Goals)
 		{
-			const TSharedPtr<FJsonObject> G = Value->AsObject();
-			if (!G.IsValid())
+			const TSharedPtr<FJsonObject> G = Value.IsValid() ? Value->AsObject() : nullptr;
+			if (G.IsValid())
 			{
-				continue;
+				R.Goals.Add(ReadGoal(G));
 			}
-			FRLGoal& Goal = R.Goals.AddDefaulted_GetRef();
-			Goal.Time = NumberOr(G, TEXT("time"));
-			Goal.Team = static_cast<int32>(NumberOr(G, TEXT("team")));
-			Goal.ScorerId = StringOr(G, TEXT("scorerId"));
-			Goal.Clock = StringOr(G, TEXT("clock"));
+		}
+		// Files list each goal without a running score; count it up from 0-0.
+		R.Goals.StableSort([](const FRLGoal& A, const FRLGoal& B) { return A.Time < B.Time; });
+		int32 Running[2] = {0, 0};
+		for (FRLGoal& Goal : R.Goals)
+		{
+			++Running[Goal.Team];
+			Goal.ScoreAfter[0] = Running[0];
+			Goal.ScoreAfter[1] = Running[1];
 		}
 	}
 
@@ -211,25 +292,62 @@ bool FRLReplay::LoadFromString(const FString& Json, FRLReplay& Out, FString& Out
 	{
 		for (const TSharedPtr<FJsonValue>& Value : *Moments)
 		{
-			const TSharedPtr<FJsonObject> M = Value->AsObject();
-			if (!M.IsValid())
+			const TSharedPtr<FJsonObject> M = Value.IsValid() ? Value->AsObject() : nullptr;
+			if (M.IsValid())
 			{
-				continue;
+				R.Moments.Add(ReadMoment(M));
 			}
-			FRLMoment& Moment = R.Moments.AddDefaulted_GetRef();
-			Moment.Time = NumberOr(M, TEXT("time"));
-			Moment.Clock = StringOr(M, TEXT("clock"));
-			Moment.PlayerId = StringOr(M, TEXT("playerId"));
-			Moment.Kind = StringOr(M, TEXT("kind"));
-			Moment.Rule = StringOr(M, TEXT("rule"));
-			Moment.Title = StringOr(M, TEXT("title"));
-			Moment.Severity = StringOr(M, TEXT("severity"), TEXT("low"));
-			Moment.Detail = StringOr(M, TEXT("detail"));
-			M->TryGetBoolField(TEXT("punished"), Moment.bPunished);
 		}
 		R.Moments.StableSort([](const FRLMoment& A, const FRLMoment& B) { return A.Time < B.Time; });
 	}
 
 	Out = MoveTemp(R);
 	return true;
+}
+
+bool FRLReplay::LoadLiveInfo(const FString& Json, FRLReplay& Out, FString& OutError)
+{
+	const TSharedPtr<FJsonObject> Root = ParseObject(Json);
+	if (!Root.IsValid())
+	{
+		return Fail(OutError, TEXT("Match info isn't valid JSON"));
+	}
+	FRLReplay R;
+	ReadMatchDetails(Root, R);
+	if (!ReadPlayers(Root, R.Players, OutError))
+	{
+		return false;
+	}
+	if (R.Players.Num() == 0 || R.Players.Num() > 8)
+	{
+		return Fail(OutError, TEXT("Match info needs 1 to 8 players"));
+	}
+	R.Cars.SetNum(R.Players.Num());
+	R.StartScore[0] = R.BlueScore;
+	R.StartScore[1] = R.OrangeScore;
+	Out = MoveTemp(R);
+	return true;
+}
+
+bool FRLLiveEvent::Load(const FString& Json, FRLLiveEvent& Out, FString& OutError)
+{
+	const TSharedPtr<FJsonObject> Root = ParseObject(Json);
+	if (!Root.IsValid())
+	{
+		return Fail(OutError, TEXT("Event isn't valid JSON"));
+	}
+	const FString Kind = StringOr(Root, TEXT("event"));
+	Out = FRLLiveEvent();
+	if (Kind == TEXT("goal"))
+	{
+		Out.bGoal = true;
+		Out.Goal = ReadGoal(Root);
+		return true;
+	}
+	if (Kind == TEXT("moment"))
+	{
+		Out.Moment = ReadMoment(Root);
+		return true;
+	}
+	return Fail(OutError, FString::Printf(TEXT("Unknown event \"%s\""), *Kind));
 }

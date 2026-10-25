@@ -18,6 +18,8 @@ public class RLReplayViewer : ModuleRules
 			"Json",
 			"Slate",
 			"SlateCore",
+			"Sockets",
+			"Networking",
 		});
 	}
 }

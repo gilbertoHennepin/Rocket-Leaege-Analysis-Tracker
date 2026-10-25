@@ -56,12 +56,23 @@ void ARLViewerGameMode::BeginPlay()
 	{
 		Pawn->SetDirector(Director);
 	}
+	Director->OnLiveMatchChanged.AddUObject(this, &ARLViewerGameMode::HandleLiveMatchChanged);
+
+	// -Live (or -Live=7777) listens for `rltracker stream` instead of opening
+	// a file; -LiveHost=0.0.0.0 accepts a stream from another computer.
+	const TCHAR* CommandLine = FCommandLine::Get();
+	FParse::Value(CommandLine, TEXT("LiveHost="), LiveHost);
+	if (FParse::Value(CommandLine, TEXT("Live="), LivePort) || FParse::Param(CommandLine, TEXT("Live")))
+	{
+		StartLive();
+		return;
+	}
 
 	// A file passed on the command line (-RLReplay="C:/path/match.rlview.json")
 	// wins; otherwise open the newest export in the Replays folder. (Not
 	// -Replay=, which Unreal takes for its own replay system.)
 	FString Path;
-	if (!FParse::Value(FCommandLine::Get(), TEXT("RLReplay="), Path))
+	if (!FParse::Value(CommandLine, TEXT("RLReplay="), Path))
 	{
 		const TArray<FString> Files = FindReplayFiles();
 		if (Files.Num() > 0)
@@ -110,6 +121,48 @@ void ARLViewerGameMode::OpenReplay(const FString& Path)
 	{
 		StatusMessage = FString::Printf(TEXT("Couldn't open %s: %s"), *FPaths::GetCleanFilename(Path), *Error);
 	}
+	ShowHud();
+}
+
+void ARLViewerGameMode::StartLive()
+{
+	if (!Director)
+	{
+		return;
+	}
+	FString Error;
+	if (Director->StartLive(LiveHost, LivePort, Error))
+	{
+		StatusMessage.Reset();
+	}
+	else
+	{
+		StatusMessage = FString::Printf(TEXT("Couldn't listen for a live match: %s"), *Error);
+	}
+	ShowHud();
+}
+
+void ARLViewerGameMode::StopLive()
+{
+	if (Director)
+	{
+		Director->StopLive();
+	}
+	ShowHud();
+}
+
+void ARLViewerGameMode::HandleLiveMatchChanged(bool bNewMatch)
+{
+	if (bNewMatch)
+	{
+		StatusMessage.Reset();
+		ARLViewerPawn* Pawn = Cast<ARLViewerPawn>(UGameplayStatics::GetPlayerPawn(this, 0));
+		if (Pawn && Director)
+		{
+			Pawn->SetCameraMode(Director->GetFocusPlayer() != INDEX_NONE ? ERLCameraMode::BallCam : ERLCameraMode::Orbit);
+		}
+	}
+	// The HUD lists the players and moments it was built with, so rebuild it.
 	ShowHud();
 }
 

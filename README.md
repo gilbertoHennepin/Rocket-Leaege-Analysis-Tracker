@@ -196,6 +196,22 @@ Replays are found automatically in
 `Documents\My Games\Rocket League\TAGame\Demos` (including OneDrive-redirected
 Documents). Set `RLTRACKER_REPLAY_DIR` to use a different folder.
 
+### Live telemetry (UDP)
+
+`rltracker stream` streams a match over UDP in real time, like a game server
+streaming to spectators, and the viewer plays it as it arrives (start it with
+`-Live`). Each packet carries a sequence number and a send time, so the
+viewer measures loss, reordering and RFC 3550 jitter, drops stale frames and
+smooths playback with an adaptive jitter buffer; goals and coaching moments
+are made reliable by repetition. `--drop`, `--duplicate` and `--jitter-ms`
+simulate a bad network to show it coping. The protocol and the design are in
+[docs/telemetry.md](docs/telemetry.md).
+
+```
+rltracker stream --speed 2 --jitter-ms 40 --drop 0.05
+rltracker listen        # or receive in the terminal and print link stats
+```
+
 ### Python
 
 ```python
@@ -293,11 +309,12 @@ src/rltracker/
   rotation.py    quaternions and nose vectors from the parser's Euler angles
   export.py      save a Match as Parquet/CSV + match.json
   viewer_export.py  export a Match for the 3D viewer
+  telemetry.py   live UDP telemetry: the RLT1 protocol, sender and listener
   cli.py         the rltracker command
 tests/           pytest suite, run against real 1v1, 2v2 and 3v3 replays
 viewer/
   RLReplayViewer/  Unreal Engine 5 C++ project (3D replay viewer)
-  core-tests/      CMake unit tests for the viewer's engine-free playback core
+  core-tests/      CMake unit tests for the viewer's engine-free playback and telemetry core
 ```
 
 ## Development
@@ -323,6 +340,7 @@ cmake --build build/core-tests && ctest --test-dir build/core-tests
 - [x] **3. Tactical analysis**: detect over-commits, double commits, ball chasing, poor rotation, with timestamped tips
 - [x] **Aerial flight analysis**: boosted aerials measured with guidance and flight test methods
 - [x] **3D replay viewer**: Unreal Engine 5 C++ playback with cameras and a clickable coaching timeline
+- [x] **Live telemetry**: stream a match over UDP into the viewer, with loss, jitter and a playout buffer
 - [ ] **4. Dashboard**: per-match reports and trends over many games
 
 ## Credits

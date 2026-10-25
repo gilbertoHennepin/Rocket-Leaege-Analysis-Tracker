@@ -1,5 +1,6 @@
 // In-memory form of a match exported by `rltracker viewer-export`, and the
-// JSON loader for it. See src/rltracker/viewer_export.py for the format.
+// JSON loader for it. See src/rltracker/viewer_export.py for the format. A
+// live stream (docs/telemetry.md) fills the same structure as it arrives.
 
 #pragma once
 
@@ -34,6 +35,7 @@ struct FRLGoal
 	int32 Team = 0;
 	FString ScorerId;
 	FString Clock;
+	int32 ScoreAfter[2] = {0, 0};  // blue and orange score once this goal counts
 };
 
 // A coaching moment, for example a double commit, with the tip it belongs to.
@@ -58,8 +60,9 @@ struct RLREPLAYVIEWER_API FRLReplay
 	FString Mode;
 	FString Playlist;
 	FString RecordedBy;
-	int32 BlueScore = 0;
+	int32 BlueScore = 0;  // the file's final score; for a live match, the latest
 	int32 OrangeScore = 0;
+	int32 StartScore[2] = {0, 0};  // score at the first frame: 0-0, or when a live viewer joined
 	double Fps = 10.0;
 
 	TArray<FRLPlayerInfo> Players;
@@ -68,7 +71,7 @@ struct RLREPLAYVIEWER_API FRLReplay
 	TArray<bool> Live;
 	FRLBodyTrack Ball;
 	TArray<FRLCarTrack> Cars;  // same order as Players
-	TArray<FRLGoal> Goals;
+	TArray<FRLGoal> Goals;  // sorted by time
 	TArray<FRLMoment> Moments;  // sorted by time
 
 	int32 NumFrames() const { return static_cast<int32>(Times.size()); }
@@ -80,6 +83,28 @@ struct RLREPLAYVIEWER_API FRLReplay
 	double ClockAt(double Time) const;
 	std::vector<double> MomentTimes() const;
 
+	// Score at a replay time: from the last goal by then, or the starting score.
+	int32 ScoreAt(double Time, int32 Team) const;
+
+	// Insert keeping time order (live events can arrive slightly out of order).
+	void AddGoal(const FRLGoal& Goal);
+	void AddMoment(const FRLMoment& Moment);
+
 	static bool LoadFromFile(const FString& Path, FRLReplay& Out, FString& OutError);
 	static bool LoadFromString(const FString& Json, FRLReplay& Out, FString& OutError);
+
+	// A live stream's match info (hello) packet: the match details, the players
+	// with an empty track each, and the score when it was sent (as the starting
+	// score, for a viewer that joins mid-match).
+	static bool LoadLiveInfo(const FString& Json, FRLReplay& Out, FString& OutError);
+};
+
+// A live stream's event packet: a goal or a coaching moment.
+struct RLREPLAYVIEWER_API FRLLiveEvent
+{
+	bool bGoal = false;
+	FRLGoal Goal;
+	FRLMoment Moment;
+
+	static bool Load(const FString& Json, FRLLiveEvent& Out, FString& OutError);
 };

@@ -245,6 +245,42 @@ def _cmd_aerials(args: argparse.Namespace) -> int:
     return _run_per_match(args, handle)
 
 
+def _cmd_stream(args: argparse.Namespace) -> int:
+    from . import telemetry
+
+    impairment = telemetry.Impairment(args.drop, args.duplicate, args.jitter_ms, args.seed)
+    matches = [m for m in _parsed_matches(args) if m is not None]
+    if not matches:
+        return 1
+    address = (args.host, args.port)
+    try:
+        while True:
+            for match in matches:
+                datagrams = telemetry.impair(telemetry.schedule(match, args.speed), impairment)
+                minutes = datagrams[-1][0] / 60 if datagrams else 0
+                print(f"Streaming {match.source.name} to udp://{args.host}:{args.port} ({minutes:.1f} min)")
+                sent = telemetry.send(datagrams, address)
+                print(f"  sent {sent} packets")
+            if not args.loop:
+                return 0
+    except KeyboardInterrupt:
+        return 0
+
+
+def _cmd_listen(args: argparse.Namespace) -> int:
+    from . import telemetry
+
+    def show(listener: telemetry.Listener) -> None:
+        print(listener.status(), flush=True)
+
+    print(f"Listening on udp://{args.host}:{args.port} (Ctrl+C to stop)")
+    try:
+        listener = telemetry.listen(args.port, args.seconds, show, host=args.host)
+    except KeyboardInterrupt:
+        return 0
+    return 0 if listener.stats.received else 1
+
+
 PLAYER_ENV = "RLTRACKER_PLAYER"
 
 
@@ -373,6 +409,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_air.add_argument("--flights", action="store_true", help="List every aerial, not just the summary")
     p_air.add_argument("--cards", type=Path, help="Save a flight test card PNG per aerial into this folder")
     p_air.set_defaults(func=_cmd_aerials)
+
+    p_stream = sub.add_parser("stream", help="Stream matches as live UDP telemetry (for the viewer's -Live mode)")
+    _add_replay_args(p_stream)
+    p_stream.add_argument("--host", default="127.0.0.1", help="Where to send (default: this computer)")
+    p_stream.add_argument("--port", type=int, default=7777)
+    p_stream.add_argument("--speed", type=float, default=1.0, help="Playback speed (2 = twice as fast)")
+    p_stream.add_argument("--loop", action="store_true", help="Start over when the matches end")
+    p_stream.add_argument("--drop", type=float, default=0.0, help="Simulate packet loss (0.05 = 5%%)")
+    p_stream.add_argument("--duplicate", type=float, default=0.0, help="Simulate duplicated packets")
+    p_stream.add_argument("--jitter-ms", type=float, default=0.0, help="Simulate random delay up to this many ms")
+    p_stream.add_argument("--seed", type=int, help="Seed for the simulated network trouble")
+    p_stream.set_defaults(func=_cmd_stream)
+
+    p_listen = sub.add_parser("listen", help="Receive a telemetry stream and print link statistics")
+    p_listen.add_argument("--host", default="127.0.0.1", help="Address to listen on (0.0.0.0 accepts other computers)")
+    p_listen.add_argument("--port", type=int, default=7777)
+    p_listen.add_argument("--seconds", type=float, help="Stop after this long (default: until the stream ends)")
+    p_listen.set_defaults(func=_cmd_listen)
 
     p_heat = sub.add_parser("heatmap", help="Save heat maps and touch maps as PNG images")
     _add_replay_args(p_heat)
