@@ -100,6 +100,10 @@ void ARLDemoCapture::BeginStep()
 	Clock.Seek(Step.Time);
 	Director->SetFocusPlayer(Step.Focus);
 	Pawn->SetCameraMode(Step.Camera);
+	if (Step.Camera == ERLCameraMode::Orbit)
+	{
+		Pawn->SetOrbit(-60.0, 40.0, 5600.0);  // high and wide enough to show most of the field
+	}
 	SettleLeft = SettleSeconds;
 	Frame = 0;
 }
