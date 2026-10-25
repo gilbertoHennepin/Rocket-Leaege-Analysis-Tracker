@@ -10,6 +10,8 @@ Everything is C++: the arena, cars, cameras, playback and the on-screen UI
 Blueprints and no binary `.uasset` files, so every change is reviewable in a
 diff.
 
+![Ball cam with the coaching timeline](../docs/images/viewer-ballcam.png)
+
 ## Build and run
 
 Requirements: **Unreal Engine 5.5 or newer** (Epic Games Launcher), plus

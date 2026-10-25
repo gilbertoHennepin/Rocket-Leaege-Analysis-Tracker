@@ -186,6 +186,12 @@ ball cam, scrub the timeline, and click a coaching moment to jump to the few
 seconds before it. Build steps, controls and the architecture are in
 [viewer/README.md](viewer/README.md).
 
+![The viewer jumping between coaching moments](docs/images/viewer-demo.gif)
+
+| Orbit | Ball cam | Top down |
+|---|---|---|
+| <img src="docs/images/viewer-orbit.png" alt="Orbit camera over a kickoff with the coaching timeline" width="300"> | <img src="docs/images/viewer-ballcam.png" alt="Ball cam following one player" width="300"> | <img src="docs/images/viewer-topdown.png" alt="Top-down view of the whole field" width="300"> |
+
 Replays are found automatically in
 `Documents\My Games\Rocket League\TAGame\Demos` (including OneDrive-redirected
 Documents). Set `RLTRACKER_REPLAY_DIR` to use a different folder.
