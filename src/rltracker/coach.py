@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from enum import IntEnum
 
+from .aerial import Aerial, find_aerials
 from .models import Match, Player
 from .moments import Moment, all_moments
 from .stats import PlayerStats, player_stats
@@ -58,6 +59,7 @@ class _Context:
     stats: PlayerStats
     lobby: list[PlayerStats]
     moments: list[Moment]  # this player's moments only
+    aerials: list[Aerial] = field(default_factory=list)  # everyone's
 
     def of_kind(self, kind: str) -> list[Moment]:
         return [m for m in self.moments if m.kind == kind]
@@ -74,6 +76,19 @@ class _Context:
     @property
     def team_mode(self) -> bool:
         return self.match.team_size > 1
+
+    def aerials_of(self, player_id: str) -> list[Aerial]:
+        """Aerials with a thrust measurement, for one player."""
+        return [a for a in self.aerials if a.player_id == player_id and a.thrust_alignment is not None]
+
+
+def _thrust_alignment(aerials: list[Aerial]) -> float:
+    """Boost-weighted thrust alignment over several aerials, as a percentage."""
+    used = sum(a.boost_used for a in aerials)
+    return 100.0 * sum(a.thrust_alignment * a.boost_used for a in aerials) / used if used else 0.0
+
+
+MIN_AERIALS = 4  # aerials with a thrust measurement before aerial feedback is given
 
 
 def _plural(n: int, noun: str) -> str:
@@ -310,6 +325,46 @@ def too_passive(c: _Context) -> Insight | None:
     )
 
 
+# Aerials ---------------------------------------------------------------------
+
+
+@rule
+def aerial_aim(c: _Context) -> Insight | None:
+    mine = c.aerials_of(c.player.id)
+    if len(mine) < MIN_AERIALS:
+        return None
+    alignment = _thrust_alignment(mine)
+    lobby = [_thrust_alignment(a) for p in c.match.players if len(a := c.aerials_of(p.id)) >= 3]
+    lobby_avg = sum(lobby) / len(lobby)
+    if alignment >= 60 or alignment > lobby_avg - 5:
+        return None
+    wasted = sum(a.wasted_boost or 0.0 for a in mine)
+    worst = sorted(mine, key=lambda a: a.thrust_alignment)[:6]
+    return Insight(
+        rule="aerial_aim",
+        severity=Severity.MEDIUM if alignment < 50 else Severity.LOW,
+        title="You boost off target in the air",
+        message=(
+            f"Only {alignment:.0f}% of your thrust in the air pushed toward where you met the ball "
+            f"(lobby average {lobby_avg:.0f}%). That cost about {wasted:.0f} boost over {len(mine)} aerials."
+        ),
+        tip=(
+            "Before holding boost, point your nose at where you'll meet the ball, not where it is now. "
+            "Then feather boost and make small corrections instead of steering hard while boosting."
+        ),
+        moments=[
+            Moment(
+                "aerial",
+                a.player_id,
+                a.start,
+                a.duration,
+                detail=f"{a.thrust_alignment:.0%} thrust alignment, {a.wasted_boost:.0f} boost wasted",
+            )
+            for a in sorted(worst, key=lambda a: a.start)
+        ],
+    )
+
+
 # Strengths -----------------------------------------------------------------
 
 
@@ -327,6 +382,9 @@ def _strengths(c: _Context) -> list[Strength]:
         out.append(Strength("Strong defender", f"{s.saves} saves."))
     if s.goals >= 2:
         out.append(Strength("Finishing", f"{s.goals} goals from {s.shots} shots."))
+    aerials = c.aerials_of(c.player.id)
+    if len(aerials) >= MIN_AERIALS and (alignment := _thrust_alignment(aerials)) >= 75:
+        out.append(Strength("Clean aerial control", f"{alignment:.0f}% thrust alignment over {len(aerials)} aerials."))
     if s.pct_supersonic >= 20:
         out.append(Strength("Fast player", f"Supersonic {s.pct_supersonic:.0f}% of the time."))
     if s.stolen_big_pads >= 8:
@@ -343,9 +401,10 @@ def coach(match: Match) -> dict[str, Report]:
     """Coaching reports for every player, keyed by player id."""
     lobby = player_stats(match)
     moments = all_moments(match)
+    aerials = find_aerials(match)
     reports = {}
     for player, stats in zip(match.players, lobby, strict=True):
-        ctx = _Context(match, player, stats, lobby, [m for m in moments if m.player_id == player.id])
+        ctx = _Context(match, player, stats, lobby, [m for m in moments if m.player_id == player.id], aerials)
         insights = [i for i in (r(ctx) for r in RULES) if i is not None]
         insights.sort(key=lambda i: (-i.severity, -len(i.moments)))
         reports[player.id] = Report(player, stats, insights, _strengths(ctx))

@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__
+from .aerial import Aerial, aerial_summary, find_aerials
 from .coach import Report, coach, report_to_dict
 from .discovery import REPLAY_DIR_ENV, default_replay_dir, find_replays
 from .export import export_match
@@ -195,6 +196,55 @@ def _cmd_heatmap(args: argparse.Namespace) -> int:
     return _run_per_match(args, handle)
 
 
+def _cell(value: float, fmt: str) -> str:
+    return "-" if value != value else fmt.format(value)  # NaN for players with no aerials
+
+
+def format_aerials(match: Match, aerials: list[Aerial], flights: bool = False) -> str:
+    summary = aerial_summary(match, aerials)
+    width = 12
+    names = "".join(f"{name[: width - 1]:>{width}}" for name in summary.index)
+    teams = "".join(f"{team:>{width}}" for team in summary["team"])
+    lines = [f"{match.source.name}  ({match.mode}, boosted aerials in live play)", f"  {'':<28}{names}"]
+    lines.append(f"  {'':<28}{teams}")
+    rows = [
+        ("Aerials", lambda r: f"{r.aerials}"),
+        ("Touched the ball", lambda r: f"{r.touches} ({_cell(r.touch_rate, '{:.0f}%')})" if r.aerials else "-"),
+        ("Boost per aerial", lambda r: _cell(r.boost_per_aerial, "{:.0f}")),
+        ("Thrust alignment", lambda r: _cell(r.thrust_alignment, "{:.0f}%")),
+        ("Boost lost to cosine loss", lambda r: f"{r.wasted_boost:.0f}"),
+        ("Median apex (uu)", lambda r: _cell(r.median_apex, "{:.0f}")),
+        ("Near misses", lambda r: f"{r.near_misses}"),
+    ]
+    for label, cell in rows:
+        lines.append(f"    {label:<26}" + "".join(f"{cell(r):>{width}}" for r in summary.itertuples()))
+    if flights and aerials:
+        lines += ["", "  Flights:"]
+        for a in aerials:
+            name = match.player(a.player_id).name
+            result = f"touch at {a.intercept[2]:.0f} uu" if a.touched else f"missed by {a.miss_distance:.0f} uu"
+            aim = "" if a.thrust_alignment is None else f"  {a.thrust_alignment:.0%} aligned"
+            lines.append(
+                f"    {match.game_time_label(a.start):>5}  {name[:16]:<16} {result:<20} "
+                f"{a.boost_used:>3.0f} boost  apex {a.apex:>4.0f} uu{aim}"
+            )
+    return "\n".join(lines)
+
+
+def _cmd_aerials(args: argparse.Namespace) -> int:
+    def handle(match: Match) -> None:
+        player_id = match.player(args.player).id if args.player else None
+        aerials = find_aerials(match, player_id)
+        print(format_aerials(match, aerials, flights=args.flights or bool(args.player)))
+        if args.cards:
+            from .flightcard import save_flight_cards  # matplotlib is slow to import
+
+            paths = save_flight_cards(match, Path(args.cards) / match.source.stem, args.player)
+            print(f"\n  Saved {len(paths)} flight cards to {Path(args.cards) / match.source.stem}")
+
+    return _run_per_match(args, handle)
+
+
 PLAYER_ENV = "RLTRACKER_PLAYER"
 
 
@@ -316,6 +366,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output folder (default: the viewer project's Replays folder)",
     )
     p_view.set_defaults(func=_cmd_viewer)
+
+    p_air = sub.add_parser("aerials", help="Analyze boosted aerials like flight test data")
+    _add_replay_args(p_air)
+    p_air.add_argument("--player", help="Only this player's aerials (lists each flight)")
+    p_air.add_argument("--flights", action="store_true", help="List every aerial, not just the summary")
+    p_air.add_argument("--cards", type=Path, help="Save a flight test card PNG per aerial into this folder")
+    p_air.set_defaults(func=_cmd_aerials)
 
     p_heat = sub.add_parser("heatmap", help="Save heat maps and touch maps as PNG images")
     _add_replay_args(p_heat)
