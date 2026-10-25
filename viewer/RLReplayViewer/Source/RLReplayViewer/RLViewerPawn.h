@@ -52,6 +52,7 @@ private:
 	void Slower();
 	void NextMoment();
 	void PreviousMoment();
+	void GoLive();
 	void ToggleHud() { bHudVisible = !bHudVisible; }
 	void ZoomIn();
 	void ZoomOut();

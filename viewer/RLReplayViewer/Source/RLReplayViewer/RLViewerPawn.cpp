@@ -140,6 +140,7 @@ void ARLViewerPawn::SetupPlayerInputComponent(UInputComponent* Input)
 	Input->BindKey(EKeys::Down, IE_Pressed, this, &ARLViewerPawn::Slower);
 	Input->BindKey(EKeys::N, IE_Pressed, this, &ARLViewerPawn::NextMoment);
 	Input->BindKey(EKeys::P, IE_Pressed, this, &ARLViewerPawn::PreviousMoment);
+	Input->BindKey(EKeys::L, IE_Pressed, this, &ARLViewerPawn::GoLive);
 
 	// Camera
 	Input->BindKey(EKeys::C, IE_Pressed, this, &ARLViewerPawn::CycleCameraMode);
@@ -217,6 +218,14 @@ void ARLViewerPawn::PreviousMoment()
 	if (Director.IsValid())
 	{
 		Director->JumpToPreviousMoment();
+	}
+}
+
+void ARLViewerPawn::GoLive()
+{
+	if (Director.IsValid())
+	{
+		Director->GoLive();
 	}
 }
 

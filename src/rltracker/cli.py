@@ -14,10 +14,10 @@ from pathlib import Path
 from . import __version__
 from .aerial import Aerial, aerial_summary, find_aerials
 from .coach import Report, coach, report_to_dict
+from .dashboard import write_dashboard
 from .discovery import REPLAY_DIR_ENV, default_replay_dir, find_replays
 from .export import export_match
 from .models import Match, Player, Team
-from .moments import Moment
 from .parser import DEFAULT_FPS, ReplayParseError, parse_replay
 from .stats import player_stats, stats_table
 from .viewer_export import export_viewer
@@ -245,6 +245,42 @@ def _cmd_aerials(args: argparse.Namespace) -> int:
     return _run_per_match(args, handle)
 
 
+def _cmd_stream(args: argparse.Namespace) -> int:
+    from . import telemetry
+
+    impairment = telemetry.Impairment(args.drop, args.duplicate, args.jitter_ms, args.seed)
+    matches = [m for m in _parsed_matches(args) if m is not None]
+    if not matches:
+        return 1
+    address = (args.host, args.port)
+    try:
+        while True:
+            for match in matches:
+                datagrams = telemetry.impair(telemetry.schedule(match, args.speed), impairment)
+                minutes = datagrams[-1][0] / 60 if datagrams else 0
+                print(f"Streaming {match.source.name} to udp://{args.host}:{args.port} ({minutes:.1f} min)")
+                sent = telemetry.send(datagrams, address)
+                print(f"  sent {sent} packets")
+            if not args.loop:
+                return 0
+    except KeyboardInterrupt:
+        return 0
+
+
+def _cmd_listen(args: argparse.Namespace) -> int:
+    from . import telemetry
+
+    def show(listener: telemetry.Listener) -> None:
+        print(listener.status(), flush=True)
+
+    print(f"Listening on udp://{args.host}:{args.port} (Ctrl+C to stop)")
+    try:
+        listener = telemetry.listen(args.port, args.seconds, show, host=args.host)
+    except KeyboardInterrupt:
+        return 0
+    return 0 if listener.stats.received else 1
+
+
 PLAYER_ENV = "RLTRACKER_PLAYER"
 
 
@@ -265,13 +301,6 @@ def _pick_players(match: Match, args: argparse.Namespace) -> list[Player]:
     return list(match.players)
 
 
-def _format_moment(match: Match, moment: Moment) -> str:
-    clock = match.game_time_label(moment.time)
-    # Conceded goals and shots you were caught ahead for are punished by definition.
-    show = moment.punished and moment.kind not in ("conceded", "caught_ahead")
-    return f"{clock} (punished)" if show else clock
-
-
 def format_report(match: Match, report: Report) -> str:
     p = report.player
     lines = [f"Coaching report: {p.name} ({p.team.label})", ""]
@@ -283,7 +312,7 @@ def format_report(match: Match, report: Report) -> str:
             lines += [f"     {line}" for line in textwrap.wrap("Tip: " + insight.tip, 88)]
             if insight.moments:
                 shown = insight.moments[:6]
-                when = ", ".join(_format_moment(match, m) for m in shown)
+                when = ", ".join(m.label(match) for m in shown)
                 more = f" and {len(insight.moments) - len(shown)} more" if len(insight.moments) > len(shown) else ""
                 lines += [f"     {line}" for line in textwrap.wrap(f"When (clock): {when}{more}", 88)]
             lines.append("")
@@ -312,6 +341,21 @@ def _cmd_coach(args: argparse.Namespace) -> int:
             print(f"  Saved {out}")
 
     return _run_per_match(args, handle)
+
+
+def _cmd_dashboard(args: argparse.Namespace) -> int:
+    matches = [m for m in _parsed_matches(args) if m is not None]
+    if not matches:
+        return 1
+    name = args.player or os.environ.get(PLAYER_ENV)
+    path, entries, skipped = write_dashboard(matches, args.out, name, heatmaps=not args.no_heatmaps)
+    if not entries:
+        print(f"error: {name!r} isn't in any of these matches", file=sys.stderr)
+        return 1
+    for match in skipped:
+        print(f"  Left out {match.source.name}: {name!r} isn't in it")
+    print(f"Wrote {path} ({len(entries)} matches). Open it in a browser.")
+    return 0
 
 
 def _cmd_viewer(args: argparse.Namespace) -> int:
@@ -357,6 +401,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_coach.add_argument("--json", type=Path, help="Also save every player's report as JSON in this folder")
     p_coach.set_defaults(func=_cmd_coach)
 
+    p_dash = sub.add_parser("dashboard", help="Write a session review page (HTML) for your recent matches")
+    _add_replay_args(p_dash)
+    p_dash.set_defaults(latest=10)
+    p_dash.add_argument("--player", help=f"Whose dashboard (default: ${PLAYER_ENV}, else each replay's owner)")
+    p_dash.add_argument("--out", type=Path, default=Path("rltracker-dashboard.html"), help="Output file")
+    p_dash.add_argument("--no-heatmaps", action="store_true", help="Leave out heat maps (faster, smaller file)")
+    p_dash.set_defaults(func=_cmd_dashboard)
+
     p_view = sub.add_parser("viewer-export", help="Export matches for the Unreal 3D replay viewer")
     _add_replay_args(p_view)
     p_view.add_argument(
@@ -373,6 +425,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_air.add_argument("--flights", action="store_true", help="List every aerial, not just the summary")
     p_air.add_argument("--cards", type=Path, help="Save a flight test card PNG per aerial into this folder")
     p_air.set_defaults(func=_cmd_aerials)
+
+    p_stream = sub.add_parser("stream", help="Stream matches as live UDP telemetry (for the viewer's -Live mode)")
+    _add_replay_args(p_stream)
+    p_stream.add_argument("--host", default="127.0.0.1", help="Where to send (default: this computer)")
+    p_stream.add_argument("--port", type=int, default=7777)
+    p_stream.add_argument("--speed", type=float, default=1.0, help="Playback speed (2 = twice as fast)")
+    p_stream.add_argument("--loop", action="store_true", help="Start over when the matches end")
+    p_stream.add_argument("--drop", type=float, default=0.0, help="Simulate packet loss (0.05 = 5%%)")
+    p_stream.add_argument("--duplicate", type=float, default=0.0, help="Simulate duplicated packets")
+    p_stream.add_argument("--jitter-ms", type=float, default=0.0, help="Simulate random delay up to this many ms")
+    p_stream.add_argument("--seed", type=int, help="Seed for the simulated network trouble")
+    p_stream.set_defaults(func=_cmd_stream)
+
+    p_listen = sub.add_parser("listen", help="Receive a telemetry stream and print link statistics")
+    p_listen.add_argument("--host", default="127.0.0.1", help="Address to listen on (0.0.0.0 accepts other computers)")
+    p_listen.add_argument("--port", type=int, default=7777)
+    p_listen.add_argument("--seconds", type=float, help="Stop after this long (default: until the stream ends)")
+    p_listen.set_defaults(func=_cmd_listen)
 
     p_heat = sub.add_parser("heatmap", help="Save heat maps and touch maps as PNG images")
     _add_replay_args(p_heat)

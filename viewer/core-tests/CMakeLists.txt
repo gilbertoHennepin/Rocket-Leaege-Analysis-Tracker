@@ -5,13 +5,14 @@ project(rlreplay_core_tests CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(test_replay_core test_replay_core.cpp)
-
-if(MSVC)
-  target_compile_options(test_replay_core PRIVATE /W4 /WX)
-else()
-  target_compile_options(test_replay_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
-
 enable_testing()
-add_test(NAME replay_core COMMAND test_replay_core)
+
+foreach(name replay_core telemetry_core)
+  add_executable(test_${name} test_${name}.cpp)
+  if(MSVC)
+    target_compile_options(test_${name} PRIVATE /W4 /WX)
+  else()
+    target_compile_options(test_${name} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  endif()
+  add_test(NAME ${name} COMMAND test_${name})
+endforeach()

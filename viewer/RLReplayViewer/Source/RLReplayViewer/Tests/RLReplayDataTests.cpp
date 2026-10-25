@@ -55,6 +55,8 @@ bool FRLReplayLoadsValidFile::RunTest(const FString& Parameters)
 	TestFalse(TEXT("second frame not live"), Replay.Live[1]);
 	TestEqual(TEXT("boost"), Replay.Cars[0].Boost[1], 34.0);
 	TestEqual(TEXT("goals"), Replay.Goals.Num(), 1);
+	TestEqual(TEXT("0-0 before the goal"), Replay.ScoreAt(0.05, 0), 0);
+	TestEqual(TEXT("1-0 after it"), Replay.ScoreAt(0.1, 0), 1);
 	TestEqual(TEXT("clock at start"), Replay.ClockAt(0.0), 300.0);
 
 	TestEqual(TEXT("moments"), Replay.Moments.Num(), 2);
@@ -81,6 +83,55 @@ bool FRLReplayRejectsBadFiles::RunTest(const FString& Parameters)
 	Rejects(TEXT("short ball track"), Valid.Replace(TEXT("[0,0,93, 10,0,93]"), TEXT("[0,0,93]")));
 	Rejects(TEXT("short boost track"), Valid.Replace(TEXT("[33, 34]"), TEXT("[33]")));
 	Rejects(TEXT("unsorted times"), Valid.Replace(TEXT("[0.0, 0.1]"), TEXT("[0.1, 0.0]")));
+	return true;
+}
+
+// Live mode: match info joined mid-match at 2-1, then a goal and a moment
+// arriving as events (src/rltracker/telemetry.py writes these).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRLReplayLoadsLiveStream, "RLReplayViewer.Data.LoadsLiveStream", RL_TEST_FLAGS)
+
+bool FRLReplayLoadsLiveStream::RunTest(const FString& Parameters)
+{
+	FRLReplay Replay;
+	FString Error;
+	const TCHAR* Hello = TEXT(R"json({"source": "test.replay", "mode": "2v2", "playlist": "Ranked Doubles",
+		"fps": 30, "recordedBy": "p1", "score": {"blue": 2, "orange": 1},
+		"players": [{"id": "p1", "name": "\u00c5lpha", "team": 0, "car": "Octane"},
+		            {"id": "p2", "name": "Bravo", "team": 1, "car": "Fennec"}]})json");
+	if (!TestTrue(TEXT("loads match info"), FRLReplay::LoadLiveInfo(Hello, Replay, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	TestEqual(TEXT("players"), Replay.Players.Num(), 2);
+	TestEqual(TEXT("an empty track per player"), Replay.Cars.Num(), 2);
+	TestTrue(TEXT("no frames yet"), Replay.IsEmpty());
+	TestEqual(TEXT("non-ASCII name"), Replay.Players[0].Name, FString(TEXT("\u00C5lpha")));
+	TestEqual(TEXT("joined at 2-1"), Replay.ScoreAt(0.0, 0), 2);
+	TestEqual(TEXT("joined at 2-1 (orange)"), Replay.ScoreAt(0.0, 1), 1);
+
+	FRLLiveEvent Goal;
+	TestTrue(TEXT("goal event"), FRLLiveEvent::Load(TEXT(R"json({"event": "goal", "time": 50.0, "team": 1,
+		"scorerId": "p2", "clock": "3:10", "score": {"blue": 2, "orange": 2}})json"), Goal, Error));
+	TestTrue(TEXT("is a goal"), Goal.bGoal);
+	Replay.AddGoal(Goal.Goal);
+	TestEqual(TEXT("2-1 before"), Replay.ScoreAt(49.0, 1), 1);
+	TestEqual(TEXT("2-2 after"), Replay.ScoreAt(50.0, 1), 2);
+
+	FRLLiveEvent Late, Early;
+	TestTrue(TEXT("moment event"), FRLLiveEvent::Load(TEXT(R"json({"event": "moment", "time": 40.0, "clock": "3:20",
+		"playerId": "p1", "kind": "double_commit", "rule": "r", "title": "Late", "severity": "high",
+		"detail": "d", "punished": true})json"), Late, Error));
+	FRLLiveEvent::Load(TEXT(R"json({"event": "moment", "time": 30.0, "title": "Early"})json"), Early, Error);
+	TestFalse(TEXT("is a moment"), Late.bGoal);
+	TestEqual(TEXT("moment kind kept"), Late.Moment.Kind, FString(TEXT("double_commit")));
+	Replay.AddMoment(Late.Moment);
+	Replay.AddMoment(Early.Moment);  // arrives out of order
+	TestEqual(TEXT("moments kept in time order"), Replay.Moments[0].Title, FString(TEXT("Early")));
+
+	FRLLiveEvent Unknown;
+	TestFalse(TEXT("unknown event rejected"), FRLLiveEvent::Load(TEXT(R"json({"event": "demo"})json"), Unknown, Error));
+	TestFalse(TEXT("no players rejected"), FRLReplay::LoadLiveInfo(TEXT(R"json({"players": []})json"), Replay, Error));
 	return true;
 }
 

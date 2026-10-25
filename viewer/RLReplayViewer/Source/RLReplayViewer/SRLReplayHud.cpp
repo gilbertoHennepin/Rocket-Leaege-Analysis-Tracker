@@ -64,6 +64,33 @@ FText MatchTitle(const FRLReplay& Replay)
 	return FText::FromString(FString::Printf(TEXT("%s \u00B7 %s"), *Replay.Mode, *Replay.Playlist));
 }
 
+// One line about the live link, for the top bar and the left panel.
+FText LiveStatusText(const FRLLiveStatus& Status)
+{
+	using EState = FRLLiveStatus::EState;
+	switch (Status.State)
+	{
+	case EState::Off:
+		return LOCTEXT("LiveOff", "Not listening");
+	case EState::Waiting:
+		return FText::Format(LOCTEXT("LiveWaiting", "Listening on {0}. Run `rltracker stream` to send a match."),
+			FText::FromString(Status.Address));
+	case EState::Quiet:
+		return LOCTEXT("LiveQuiet", "No packets for a few seconds");
+	case EState::Ended:
+		return LOCTEXT("LiveEnded", "The stream ended. Scrub through it, or start another.");
+	default:
+		break;
+	}
+	FString Line = FString::Printf(TEXT("%.0f pkt/s  \u00B7  loss %.1f%%  \u00B7  jitter %.0f ms  \u00B7  buffer %.0f ms"),
+		Status.PacketsPerSecond, Status.LossPercent, Status.JitterMs, Status.BufferMs);
+	if (!Status.bFollowing)
+	{
+		Line += FString::Printf(TEXT("  \u00B7  %.1f s behind"), Status.BehindSeconds);
+	}
+	return FText::FromString(Line);
+}
+
 FString ReplayLabel(const FString& Path)
 {
 	FString Name = FPaths::GetCleanFilename(Path);
@@ -166,19 +193,12 @@ TSharedRef<SWidget> SRLReplayHud::MakeTopBar()
 
 	TWeakObjectPtr<ARLReplayDirector> WeakDirector = Director;
 
-	// Score counts goals up to the current replay time, so it changes as the match plays.
+	// The score at the current replay time, so it changes as the match plays.
 	auto ScoreFor = [WeakDirector](int32 Team) {
 		return TAttribute<FText>::CreateLambda([WeakDirector, Team]() {
-			int32 Goals = 0;
-			if (WeakDirector.IsValid())
-			{
-				const double Now = WeakDirector->GetClock().GetTime();
-				for (const FRLGoal& Goal : WeakDirector->GetReplay().Goals)
-				{
-					Goals += (Goal.Team == Team && Goal.Time <= Now) ? 1 : 0;
-				}
-			}
-			return FText::AsNumber(Goals);
+			const int32 Score =
+				WeakDirector.IsValid() ? WeakDirector->GetReplay().ScoreAt(WeakDirector->GetClock().GetTime(), Team) : 0;
+			return FText::AsNumber(Score);
 		});
 	};
 
@@ -218,6 +238,19 @@ TSharedRef<SWidget> SRLReplayHud::MakeTopBar()
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 2.0f, 0.0f, 0.0f)
 		[
 			SNew(STextBlock).Text(MatchTitle(Director->GetReplay())).Font(Font(10)).ColorAndOpacity(MutedText)
+		]
+		// Link quality, while the match is live.
+		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 2.0f, 0.0f, 0.0f)
+		[
+			SNew(STextBlock)
+				.Visibility_Lambda([WeakDirector]() {
+					return WeakDirector.IsValid() && WeakDirector->IsLive() ? EVisibility::Visible : EVisibility::Collapsed;
+				})
+				.Text_Lambda([WeakDirector]() {
+					return WeakDirector.IsValid() ? LiveStatusText(WeakDirector->GetLiveStatus()) : FText::GetEmpty();
+				})
+				.Font(Font(10))
+				.ColorAndOpacity(TextColor)
 		]);
 }
 
@@ -314,6 +347,43 @@ TSharedRef<SWidget> SRLReplayHud::MakeLeftPanel()
 		}
 	}
 
+	// Live: listen for `rltracker stream`, or stop listening.
+	TWeakObjectPtr<ARLViewerGameMode> WeakGameMode = GameMode;
+	const bool bLive = Director.IsValid() && Director->IsLive();
+	Box->AddSlot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 4.0f)
+	[
+		Heading(LOCTEXT("LiveHeading", "LIVE"))
+	];
+	Box->AddSlot().AutoHeight().HAlign(HAlign_Left)
+	[
+		MakeButton(bLive ? LOCTEXT("StopLive", "Stop listening") : LOCTEXT("Listen", "Listen for a live match"),
+			LOCTEXT("ListenTip", "Receive a match streamed over UDP by `rltracker stream`"), [WeakGameMode, bLive]() {
+				// Like opening a match, this rebuilds the HUD: wait for the click to finish.
+				if (WeakGameMode.IsValid())
+				{
+					WeakGameMode->GetWorldTimerManager().SetTimerForNextTick([WeakGameMode, bLive]() {
+						if (WeakGameMode.IsValid())
+						{
+							bLive ? WeakGameMode->StopLive() : WeakGameMode->StartLive();
+						}
+					});
+				}
+			})
+	];
+	if (bLive && !HasReplay())
+	{
+		Box->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+		[
+			SNew(STextBlock)
+				.Text_Lambda([WeakDirector]() {
+					return WeakDirector.IsValid() ? LiveStatusText(WeakDirector->GetLiveStatus()) : FText::GetEmpty();
+				})
+				.Font(Font(11))
+				.ColorAndOpacity(TextColor)
+				.AutoWrapText(true)
+		];
+	}
+
 	// Match picker: every export in the Replays folder, newest first.
 	const TArray<FString> Files = ARLViewerGameMode::FindReplayFiles();
 	if (Files.Num() > 0)
@@ -325,7 +395,6 @@ TSharedRef<SWidget> SRLReplayHud::MakeLeftPanel()
 
 		TSharedRef<SScrollBox> List = SNew(SScrollBox);
 		const FString Loaded = Director.IsValid() ? Director->GetLoadedPath() : FString();
-		TWeakObjectPtr<ARLViewerGameMode> WeakGameMode = GameMode;
 		for (const FString& Path : Files)
 		{
 			const bool bLoaded = FPaths::IsSamePath(Path, Loaded);
@@ -443,23 +512,46 @@ TSharedRef<SWidget> SRLReplayHud::MakeRightPanel()
 			Heading(LOCTEXT("Moments", "COACHING MOMENTS  (N / P)"))
 		];
 
-	if (Replay.Moments.Num() == 0)
-	{
-		Box->AddSlot().AutoHeight()
-		[
-			SNew(STextBlock)
-				.Text(LOCTEXT("NoMoments", "No coaching moments in this match."))
-				.Font(Font(11))
-				.ColorAndOpacity(MutedText)
-		];
-	}
-	else
-	{
-		Box->AddSlot().AutoHeight()
-		[
-			SNew(SBox).MaxDesiredHeight(520.0f)[List]
-		];
-	}
+	// Said when nothing is listed: no moments at all, none yet (live), or none
+	// for the player being followed.
+	Box->AddSlot().AutoHeight()
+	[
+		SNew(STextBlock)
+			.Visibility_Lambda([WeakDirector]() {
+				if (!WeakDirector.IsValid())
+				{
+					return EVisibility::Collapsed;
+				}
+				const FRLReplay& R = WeakDirector->GetReplay();
+				const int32 Focus = WeakDirector->GetFocusPlayer();
+				const bool bAny = R.Moments.ContainsByPredicate(
+					[&R, Focus](const FRLMoment& M) { return Focus == INDEX_NONE || R.FindPlayer(M.PlayerId) == Focus; });
+				return bAny ? EVisibility::Collapsed : EVisibility::Visible;
+			})
+			.Text_Lambda([WeakDirector]() {
+				if (!WeakDirector.IsValid())
+				{
+					return FText::GetEmpty();
+				}
+				const FRLReplay& R = WeakDirector->GetReplay();
+				const int32 Focus = WeakDirector->GetFocusPlayer();
+				const bool bLive = WeakDirector->IsLive();
+				if (R.Players.IsValidIndex(Focus) && R.Moments.Num() > 0)
+				{
+					return FText::Format(LOCTEXT("NoMomentsFor", "None for {0}{1}. Press 0 to see everyone's."),
+						FText::FromString(R.Players[Focus].Name), bLive ? LOCTEXT("Yet", " yet") : FText::GetEmpty());
+				}
+				return bLive ? LOCTEXT("NoMomentsYet", "None yet. They appear here as the match is played.")
+							 : LOCTEXT("NoMoments", "No coaching moments in this match.");
+			})
+			.Font(Font(11))
+			.ColorAndOpacity(MutedText)
+			.AutoWrapText(true)
+	];
+	Box->AddSlot().AutoHeight()
+	[
+		SNew(SBox).MaxDesiredHeight(520.0f)[List]
+	];
 
 	return SNew(SBox).WidthOverride(320.0f)[Panel(Box)];
 }
@@ -648,10 +740,39 @@ TSharedRef<SWidget> SRLReplayHud::MakeBottomBar()
 				.ColorAndOpacity(TextColor)
 		]);
 
+	// Live: shows LIVE at the live edge, or offers to jump back to it.
+	AddControl(SNew(SButton)
+		.IsFocusable(false)
+		.Visibility_Lambda([WeakDirector]() {
+			return WeakDirector.IsValid() && WeakDirector->IsLive() ? EVisibility::Visible : EVisibility::Collapsed;
+		})
+		.ButtonColorAndOpacity(ButtonColor)
+		.ContentPadding(FMargin(10.0f, 4.0f))
+		.ToolTipText(LOCTEXT("GoLiveTip", "Jump to the live edge (L)"))
+		.OnClicked_Lambda([WeakDirector]() {
+			if (WeakDirector.IsValid())
+			{
+				WeakDirector->GoLive();
+			}
+			return FReply::Handled();
+		})
+		[
+			SNew(STextBlock)
+				.Text_Lambda([WeakDirector]() {
+					const bool bAtEdge = WeakDirector.IsValid() && WeakDirector->IsFollowingLive();
+					return bAtEdge ? LOCTEXT("AtLive", "\u25CF LIVE") : LOCTEXT("GoLive", "Go live");
+				})
+				.ColorAndOpacity_Lambda([WeakDirector]() {
+					const bool bAtEdge = WeakDirector.IsValid() && WeakDirector->IsFollowingLive();
+					return FSlateColor(bAtEdge ? RLShapes::Colors::SeverityText(TEXT("high")) : TextColor);
+				})
+				.Font(Font(13, true))
+		]);
+
 	Controls->AddSlot().FillWidth(1.0f).HAlign(HAlign_Right).VAlign(VAlign_Center)
 	[
 		SNew(STextBlock)
-			.Text(LOCTEXT("Help", "Space play  \u00B7  arrows seek / speed  \u00B7  N/P moments  \u00B7  1-8 follow  \u00B7  C camera  \u00B7  right-drag orbit  \u00B7  H hide"))
+			.Text(LOCTEXT("Help", "Space play  \u00B7  arrows seek / speed  \u00B7  N/P moments  \u00B7  1-8 follow  \u00B7  C camera  \u00B7  L live  \u00B7  right-drag orbit  \u00B7  H hide"))
 			.Font(Font(10))
 			.ColorAndOpacity(MutedText)
 	];

@@ -23,6 +23,10 @@ public:
 	// Load a match into the viewer and rebuild the HUD for it.
 	void OpenReplay(const FString& Path);
 
+	// Listen for a live match from `rltracker stream` (docs/telemetry.md), or stop.
+	void StartLive();
+	void StopLive();
+
 	const FString& GetStatusMessage() const { return StatusMessage; }
 
 protected:
@@ -33,10 +37,13 @@ private:
 	void SpawnLighting();
 	void ShowHud();
 	void HideHud();
+	void HandleLiveMatchChanged(bool bNewMatch);
 
 	UPROPERTY()
 	TObjectPtr<ARLReplayDirector> Director;
 
 	TSharedPtr<SRLReplayHud> Hud;
 	FString StatusMessage;
+	FString LiveHost = TEXT("127.0.0.1");
+	int32 LivePort = 7777;
 };

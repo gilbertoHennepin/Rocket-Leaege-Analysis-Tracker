@@ -1,37 +1,12 @@
 // Unit tests for the engine-free replay viewer core. Plain C++, no engine.
 
 #include "../RLReplayViewer/Source/RLReplayViewer/Core/ReplayCore.h"
+#include "check.h"
 
-#include <cstdio>
-#include <functional>
 #include <string>
 #include <vector>
 
 using namespace rlcore;
-
-static int Failures = 0;
-static int Checks = 0;
-
-#define CHECK(Cond)                                                          \
-	do                                                                       \
-	{                                                                        \
-		++Checks;                                                            \
-		if (!(Cond))                                                         \
-		{                                                                    \
-			++Failures;                                                      \
-			std::printf("  FAILED %s:%d: %s\n", __FILE__, __LINE__, #Cond); \
-		}                                                                    \
-	} while (0)
-
-static bool Near(double A, double B, double Tol = 1e-6)
-{
-	return std::fabs(A - B) <= Tol;
-}
-
-static bool Near(const Vec3& A, const Vec3& B, double Tol = 1e-6)
-{
-	return Near(A.X, B.X, Tol) && Near(A.Y, B.Y, Tol) && Near(A.Z, B.Z, Tol);
-}
 
 static Quat AxisAngleZ(double Radians)
 {
@@ -161,6 +136,16 @@ static void TestPlaybackClock()
 
 	PlaybackClock Empty;
 	CHECK(Empty.GetProgress() == 0.0);
+
+	// A live match's range grows as frames arrive; the time stays put.
+	PlaybackClock Live(0.0, 1.0);
+	Live.Seek(1.0);
+	Live.SetRange(0.0, 2.0);
+	CHECK(Live.GetTime() == 1.0 && !Live.IsAtEnd());
+	Live.SetRange(1.5, 1.0);  // an end before the start collapses to the start
+	CHECK(Live.GetTime() == 1.5 && Live.GetEnd() == 1.5);
+	Live.Resume();  // at the end, but doesn't restart
+	CHECK(Live.IsPlaying() && Live.GetTime() == 1.5);
 }
 
 static void TestMomentNavigation()
@@ -214,7 +199,7 @@ static void TestClampToArena()
 
 int main()
 {
-	const std::vector<std::pair<const char*, std::function<void()>>> Tests = {
+	return RunTests({
 		{"FindSample", TestFindSample},
 		{"FlatArrays", TestFlatArrays},
 		{"Rotation", TestRotation},
@@ -224,13 +209,5 @@ int main()
 		{"MomentNavigation", TestMomentNavigation},
 		{"Cameras", TestCameras},
 		{"ClampToArena", TestClampToArena},
-	};
-	for (const auto& [Name, Test] : Tests)
-	{
-		const int Before = Failures;
-		Test();
-		std::printf("%s %s\n", Failures == Before ? "ok  " : "FAIL", Name);
-	}
-	std::printf("%d checks, %d failures\n", Checks, Failures);
-	return Failures == 0 ? 0 : 1;
+	});
 }

@@ -197,8 +197,18 @@ public:
 		}
 		bPlaying = true;
 	}
+	// Play on from where it is, even at the end: a live match's end keeps moving.
+	void Resume() { bPlaying = true; }
 	void Pause() { bPlaying = false; }
 	void TogglePlay() { bPlaying ? Pause() : Play(); }
+
+	// Change the playable range, for a live match that grows as frames arrive.
+	void SetRange(double InStart, double InEnd)
+	{
+		Start = InStart;
+		End = std::max(InStart, InEnd);
+		Time = std::clamp(Time, Start, End);
+	}
 
 	void Seek(double NewTime) { Time = std::clamp(NewTime, Start, End); }
 	void SeekProgress(double Progress) { Seek(Start + std::clamp(Progress, 0.0, 1.0) * (End - Start)); }

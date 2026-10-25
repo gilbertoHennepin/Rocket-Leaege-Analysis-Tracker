@@ -40,6 +40,12 @@ or **Xcode** on macOS.
 
 To open a specific file, launch with `-RLReplay="C:/path/to/match.rlview.json"`.
 
+To watch a match live, launch with `-Live` (or click **Listen for a live
+match**) and run `rltracker stream`. The match streams over UDP and plays as
+it arrives; see [docs/telemetry.md](../docs/telemetry.md). Add
+`-LiveCapture="/abs/folder"` to have it save screenshots of live mode by itself
+and log the link stats and playback smoothness every second, then quit.
+
 To run the automation tests in the editor: **Tools > Session Frontend >
 Automation**, filter `RLReplayViewer`, run.
 
@@ -56,6 +62,7 @@ Automation**, filter `RLReplayViewer`, run.
 | C | Cycle camera: orbit, ball cam, top down |
 | Right-drag, W A S D | Orbit the camera |
 | Mouse wheel, E / Q | Zoom |
+| L | Jump to the live edge (live mode) |
 | H | Hide the HUD |
 
 Everything is also clickable: players (with live boost bars), the coaching
@@ -72,11 +79,13 @@ moments list, transport buttons, speed, camera mode and the timeline slider.
 | ---- | ---- |
 | `Core/ReplayCore.h` | Engine-free math: vectors, quaternions, slerp, frame lookup and interpolation, the playback clock, moment navigation and camera poses. Unit tested with CMake in `../core-tests` (and in CI on Windows and Linux). |
 | `RLReplayData` | JSON loader for the export format, with validation (format, version, array lengths). |
-| `RLReplayDirector` | Owns the match and the clock, moves ball and car meshes every frame, draws the ball trail and moment labels. |
+| `RLReplayDirector` | Owns the match and the clock, moves ball and car meshes every frame, draws the ball trail. In live mode it also follows the live edge. |
 | `RLArena` | Field, walls, goals and all 34 boost pads, built from basic shapes. |
 | `RLViewerPawn` | Orbit, ball cam and top down cameras, with smoothing. All keyboard and mouse input. |
 | `SRLReplayHud` | The Slate UI. |
-| `RLViewerGameMode` | Spawns lighting, arena, director and HUD, and picks which replay to open. |
+| `RLViewerGameMode` | Spawns lighting, arena, director and HUD, and picks which replay to open (or starts live mode). |
+| `Core/TelemetryCore.h` | Engine-free live mode: the RLT1 packet parser, the receiver rules (one stream, duplicates, stale frames, repeated events), RFC 3550 jitter and loss, and the playout buffer. Unit tested in `../core-tests` with the same golden packet as the Python side. |
+| `RLTelemetryReceiver` | The UDP socket, read on a background thread that stamps each datagram's arrival time. The director drains it every frame and appends the frames to the match, so live playback, scrubbing and moments use the same code as a file. |
 
 **Data format.** Frames are sampled at 10 fps and stored as flat arrays
 (`pos` = x0, y0, z0, x1, ... and `rot` = quaternion x, y, z, w per frame) so a
