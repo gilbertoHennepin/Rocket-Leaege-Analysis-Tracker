@@ -5,6 +5,7 @@
 #include "RLShapes.h"
 #include "RLViewerGameMode.h"
 #include "RLViewerPawn.h"
+#include "SRLWorldLabels.h"
 #include "Styling/CoreStyle.h"
 #include "TimerManager.h"
 #include "Widgets/Input/SButton.h"
@@ -22,7 +23,8 @@
 
 namespace
 {
-const FLinearColor PanelColor(0.02f, 0.02f, 0.02f, 0.62f);
+// Nearly opaque, so text keeps its contrast whatever is behind a panel (sky or field).
+const FLinearColor PanelColor(0.008f, 0.008f, 0.008f, 0.95f);
 const FLinearColor TextColor(0.92f, 0.91f, 0.88f);
 const FLinearColor MutedText(0.62f, 0.61f, 0.58f);
 const FLinearColor Highlight(1.0f, 1.0f, 1.0f, 0.22f);
@@ -83,9 +85,21 @@ void SRLReplayHud::Construct(const FArguments& InArgs)
 	ChildSlot
 	[
 		SNew(SOverlay)
+		+ SOverlay::Slot()
+		[
+			SNew(SRLWorldLabels).Director(InArgs._Director).Pawn(InArgs._Pawn)
+		]
 		+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Top).Padding(0.0f, 16.0f)
 		[
-			MakeTopBar()
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+			[
+				MakeTopBar()
+			]
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 8.0f, 0.0f, 0.0f)
+			[
+				MakeMomentCallout()
+			]
 		]
 		+ SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Top).Padding(16.0f, 16.0f)
 		[
@@ -100,6 +114,20 @@ void SRLReplayHud::Construct(const FArguments& InArgs)
 			MakeBottomBar()
 		]
 	];
+
+	RegisterActiveTimer(0.1f, FWidgetActiveTimerDelegate::CreateSP(this, &SRLReplayHud::ScrollToActiveMoment));
+}
+
+EActiveTimerReturnType SRLReplayHud::ScrollToActiveMoment(double CurrentTime, float DeltaTime)
+{
+	const int32 Active = Director.IsValid() ? Director->GetActiveMoment() : INDEX_NONE;
+	if (Active != ScrolledToMoment && MomentList.IsValid() && MomentRows.IsValidIndex(Active)
+		&& MomentRows[Active]->GetVisibility().IsVisible())
+	{
+		MomentList->ScrollDescendantIntoView(MomentRows[Active], true, EDescendantScrollDestination::Center);
+		ScrolledToMoment = Active;
+	}
+	return EActiveTimerReturnType::Continue;
 }
 
 bool SRLReplayHud::HasReplay() const
@@ -162,7 +190,7 @@ TSharedRef<SWidget> SRLReplayHud::MakeTopBar()
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 14.0f, 0.0f)
 			[
 				SNew(STextBlock).Text(LOCTEXT("Blue", "BLUE")).Font(Font(14, true))
-					.ColorAndOpacity(RLShapes::Colors::Blue)
+					.ColorAndOpacity(RLShapes::Colors::BlueText)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			[
@@ -184,7 +212,7 @@ TSharedRef<SWidget> SRLReplayHud::MakeTopBar()
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(14.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(STextBlock).Text(LOCTEXT("Orange", "ORANGE")).Font(Font(14, true))
-					.ColorAndOpacity(RLShapes::Colors::Orange)
+					.ColorAndOpacity(RLShapes::Colors::OrangeText)
 			]
 		]
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 2.0f, 0.0f, 0.0f)
@@ -206,7 +234,7 @@ TSharedRef<SWidget> SRLReplayHud::MakeLeftPanel()
 			SNew(STextBlock)
 				.Text(FText::FromString(GameMode->GetStatusMessage()))
 				.Font(Font(12))
-				.ColorAndOpacity(FLinearColor::FromSRGBColor(RLShapes::Colors::SeverityColor(TEXT("medium"))))
+				.ColorAndOpacity(RLShapes::Colors::SeverityText(TEXT("medium")))
 				.AutoWrapText(true)
 		];
 	}
@@ -215,14 +243,14 @@ TSharedRef<SWidget> SRLReplayHud::MakeLeftPanel()
 	{
 		Box->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
 		[
-			Heading(LOCTEXT("Players", "PLAYERS  (1-8 to follow, 0 for free camera)"))
+			Heading(LOCTEXT("Players", "PLAYERS  (1-8 to follow)"))
 		];
 
 		const TArray<FRLPlayerInfo>& Players = Director->GetReplay().Players;
 		for (int32 I = 0; I < Players.Num(); ++I)
 		{
 			const FRLPlayerInfo& Player = Players[I];
-			const FLinearColor Team = RLShapes::Colors::Team(Player.Team);
+			const FLinearColor Team = RLShapes::Colors::TeamText(Player.Team);
 
 			Box->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
 			[
@@ -348,18 +376,21 @@ TSharedRef<SWidget> SRLReplayHud::MakeRightPanel()
 	TWeakObjectPtr<ARLReplayDirector> WeakDirector = Director;
 	const FRLReplay& Replay = Director->GetReplay();
 	TSharedRef<SScrollBox> List = SNew(SScrollBox);
+	MomentList = List;
+	MomentRows.Reset();
 
 	for (int32 I = 0; I < Replay.Moments.Num(); ++I)
 	{
 		const FRLMoment& Moment = Replay.Moments[I];
 		const int32 PlayerIndex = Replay.FindPlayer(Moment.PlayerId);
 		const FString PlayerName = Replay.Players.IsValidIndex(PlayerIndex) ? Replay.Players[PlayerIndex].Name : FString();
-		const FLinearColor Severity = FLinearColor::FromSRGBColor(RLShapes::Colors::SeverityColor(Moment.Severity));
+		const FLinearColor Severity = RLShapes::Colors::SeverityText(Moment.Severity);
 		const FString Title = Moment.bPunished ? Moment.Title + TEXT("  (punished)") : Moment.Title;
 
+		TSharedPtr<SWidget> Row;
 		List->AddSlot().Padding(0.0f, 2.0f)
 		[
-			SNew(SButton)
+			SAssignNew(Row, SButton)
 				.IsFocusable(false)
 				.ContentPadding(FMargin(8.0f, 4.0f))
 				.ToolTipText(FText::FromString(Moment.Detail))
@@ -390,7 +421,11 @@ TSharedRef<SWidget> SRLReplayHud::MakeRightPanel()
 						SNew(SVerticalBox)
 						+ SVerticalBox::Slot().AutoHeight()
 						[
-							SNew(STextBlock).Text(FText::FromString(Title)).Font(Font(12, true)).ColorAndOpacity(Severity)
+							SNew(STextBlock)
+								.Text(FText::FromString(Title))
+								.Font(Font(12, true))
+								.ColorAndOpacity(Severity)
+								.AutoWrapText(true)
 						]
 						+ SVerticalBox::Slot().AutoHeight()
 						[
@@ -399,6 +434,7 @@ TSharedRef<SWidget> SRLReplayHud::MakeRightPanel()
 					]
 				]
 		];
+		MomentRows.Add(Row);
 	}
 
 	TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
@@ -426,6 +462,91 @@ TSharedRef<SWidget> SRLReplayHud::MakeRightPanel()
 	}
 
 	return SNew(SBox).WidthOverride(320.0f)[Panel(Box)];
+}
+
+TSharedRef<SWidget> SRLReplayHud::MakeMomentCallout()
+{
+	if (!HasReplay())
+	{
+		return SNullWidget::NullWidget;
+	}
+
+	// The coaching moment being shown right now, in a fixed spot under the
+	// score where it is easy to read; the player's name tag lights up in the
+	// same color to show who it is about.
+	TWeakObjectPtr<ARLReplayDirector> WeakDirector = Director;
+	auto Active = [WeakDirector]() -> const FRLMoment* {
+		if (!WeakDirector.IsValid())
+		{
+			return nullptr;
+		}
+		const TArray<FRLMoment>& Moments = WeakDirector->GetReplay().Moments;
+		const int32 I = WeakDirector->GetActiveMoment();
+		return Moments.IsValidIndex(I) ? &Moments[I] : nullptr;
+	};
+
+	return SNew(SBox)
+		.WidthOverride(560.0f)
+		.Visibility_Lambda([Active]() { return Active() ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
+		[
+			SNew(SBorder)
+				.BorderImage(WhiteBrush())
+				.BorderBackgroundColor(PanelColor)
+				.Padding(0.0f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SBorder)
+							.BorderImage(WhiteBrush())
+							.BorderBackgroundColor_Lambda([Active]() {
+								const FRLMoment* M = Active();
+								return FSlateColor(M ? RLShapes::Colors::SeverityText(M->Severity) : MutedText);
+							})
+							.Padding(FMargin(3.0f, 0.0f))
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(FMargin(12.0f, 8.0f))
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight()
+						[
+							SNew(STextBlock)
+								.Text_Lambda([Active]() {
+									const FRLMoment* M = Active();
+									if (!M)
+									{
+										return FText::GetEmpty();
+									}
+									return FText::FromString(M->bPunished ? M->Title + TEXT("  \u00B7  punished") : M->Title);
+								})
+								.ColorAndOpacity_Lambda([Active]() {
+									const FRLMoment* M = Active();
+									return FSlateColor(M ? RLShapes::Colors::SeverityText(M->Severity) : TextColor);
+								})
+								.Font(Font(15, true))
+								.AutoWrapText(true)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
+						[
+							SNew(STextBlock)
+								.Text_Lambda([Active, WeakDirector]() {
+									const FRLMoment* M = Active();
+									if (!M || !WeakDirector.IsValid())
+									{
+										return FText::GetEmpty();
+									}
+									const FRLReplay& Replay = WeakDirector->GetReplay();
+									const int32 Player = Replay.FindPlayer(M->PlayerId);
+									const FString Name = Replay.Players.IsValidIndex(Player) ? Replay.Players[Player].Name : FString();
+									return FText::FromString(FString::Printf(TEXT("%s  \u00B7  %s  \u00B7  %s"), *M->Clock, *Name, *M->Detail));
+								})
+								.ColorAndOpacity(TextColor)
+								.Font(Font(11))
+								.AutoWrapText(true)
+						]
+					]
+				]
+		];
 }
 
 TSharedRef<SWidget> SRLReplayHud::MakeBottomBar()

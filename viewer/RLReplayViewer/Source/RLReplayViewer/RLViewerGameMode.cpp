@@ -13,6 +13,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Paths.h"
 #include "RLArena.h"
+#include "RLDemoCapture.h"
 #include "RLReplayDirector.h"
 #include "RLReplayViewer.h"
 #include "RLViewerPawn.h"
@@ -76,6 +77,14 @@ void ARLViewerGameMode::BeginPlay()
 	else
 	{
 		OpenReplay(Path);
+	}
+
+	// -DemoCapture="/folder" records the README screenshots and GIF frames, then quits.
+	FString CaptureDir;
+	if (FParse::Value(FCommandLine::Get(), TEXT("DemoCapture="), CaptureDir))
+	{
+		ARLViewerPawn* Pawn = Cast<ARLViewerPawn>(UGameplayStatics::GetPlayerPawn(this, 0));
+		World->SpawnActor<ARLDemoCapture>()->Start(Director, Pawn, CaptureDir);
 	}
 }
 
