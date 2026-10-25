@@ -1,12 +1,9 @@
 #include "RLReplayDirector.h"
 
-#include "Camera/PlayerCameraManager.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/TextRenderComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "RLReplayViewer.h"
 #include "RLShapes.h"
@@ -86,53 +83,32 @@ void ARLReplayDirector::BuildVisuals()
 	BallMesh = AddShape(this, Sphere(), FVector::ZeroVector, FVector(BallDiameter), MakeMaterial(this, Colors::Ball));
 	SpawnedComponents.Add(BallMesh);
 
+	// Name tags and coaching callouts are drawn by the HUD (SRLWorldLabels),
+	// in screen space, so the cars are just shapes.
 	for (const FRLPlayerInfo& Player : Replay.Players)
 	{
-		FCarVisual& Car = Cars.AddDefaulted_GetRef();
-
-		Car.Root = NewObject<USceneComponent>(this);
-		Car.Root->SetMobility(EComponentMobility::Movable);
-		Car.Root->SetupAttachment(RootComponent);
-		Car.Root->RegisterComponent();
-		AddInstanceComponent(Car.Root);
-		SpawnedComponents.Add(Car.Root);
+		USceneComponent* Root = NewObject<USceneComponent>(this);
+		Root->SetMobility(EComponentMobility::Movable);
+		Root->SetupAttachment(RootComponent);
+		Root->RegisterComponent();
+		AddInstanceComponent(Root);
+		SpawnedComponents.Add(Root);
+		Cars.Add(Root);
 
 		const FLinearColor TeamColor = Colors::Team(Player.Team);
-		Car.Body = AddShape(this, Cube(), FVector(14, 0, 4), CarSize, MakeMaterial(this, TeamColor), FRotator::ZeroRotator, Car.Root);
+		UStaticMeshComponent* Body =
+			AddShape(this, Cube(), FVector(14, 0, 4), CarSize, MakeMaterial(this, TeamColor), FRotator::ZeroRotator, Root);
 		// A darker cone on the nose shows which way the car is facing.
 		UStaticMeshComponent* Nose = AddShape(this, Cone(), FVector(14 + CarSize.X / 2 + 12, 0, 4), FVector(40, 40, 30),
-			MakeMaterial(this, TeamColor * 0.4f), FRotator(-90, 0, 0), Car.Root);
-		SpawnedComponents.Add(Car.Body);
+			MakeMaterial(this, TeamColor * 0.4f), FRotator(-90, 0, 0), Root);
+		SpawnedComponents.Add(Body);
 		SpawnedComponents.Add(Nose);
-
-		auto MakeLabel = [this](float Size) {
-			UTextRenderComponent* Label = NewObject<UTextRenderComponent>(this);
-			Label->SetupAttachment(RootComponent);
-			Label->SetUsingAbsoluteLocation(true);
-			Label->SetUsingAbsoluteRotation(true);
-			Label->SetHorizontalAlignment(EHTA_Center);
-			Label->SetVerticalAlignment(EVRTA_TextCenter);
-			Label->SetWorldSize(Size);
-			Label->SetCastShadow(false);
-			Label->RegisterComponent();
-			AddInstanceComponent(Label);
-			SpawnedComponents.Add(Label);
-			return Label;
-		};
-		Car.Label = MakeLabel(48.0f);
-		Car.Label->SetTextRenderColor(TeamColor.ToFColor(true));
-		Car.MomentLabel = MakeLabel(56.0f);
-		Car.MomentLabel->SetVisibility(false);
 	}
 }
 
 void ARLReplayDirector::SetFocusPlayer(int32 PlayerIndex)
 {
 	FocusPlayer = Replay.Players.IsValidIndex(PlayerIndex) ? PlayerIndex : INDEX_NONE;
-	for (FCarVisual& Car : Cars)
-	{
-		Car.ShownBoost = -1;  // force label refresh
-	}
 }
 
 FVector ARLReplayDirector::GetBallLocation() const
@@ -173,12 +149,6 @@ void ARLReplayDirector::Tick(float DeltaSeconds)
 	}
 	Clock.Tick(DeltaSeconds);
 	UpdateVisuals();
-
-	const APlayerController* PC = GetWorld()->GetFirstPlayerController();
-	if (PC && PC->PlayerCameraManager)
-	{
-		UpdateLabels(PC->PlayerCameraManager->GetCameraLocation());
-	}
 	DrawBallTrail();
 }
 
@@ -193,49 +163,10 @@ void ARLReplayDirector::UpdateVisuals()
 	for (int32 I = 0; I < Cars.Num(); ++I)
 	{
 		const FRLCarTrack& Track = Replay.Cars[I];
-		Cars[I].Root->SetWorldLocationAndRotation(
+		Cars[I]->SetWorldLocationAndRotation(
 			ToFVector(rlcore::SamplePosition(Track.Pos, Sample)), ToFQuat(rlcore::SampleRotation(Track.Rot, Sample)));
 	}
 	ActiveMoment = FindMomentAt(Clock.GetTime(), INDEX_NONE);
-}
-
-void ARLReplayDirector::UpdateLabels(const FVector& CameraLocation)
-{
-	for (int32 I = 0; I < Cars.Num(); ++I)
-	{
-		FCarVisual& Car = Cars[I];
-		const FRLPlayerInfo& Player = Replay.Players[I];
-		const FVector CarLocation = Car.Root->GetComponentLocation();
-		const bool bFocus = I == FocusPlayer;
-
-		// Text renders face +X, so point X at the camera to keep labels readable.
-		auto FaceCamera = [&CameraLocation](UTextRenderComponent* Label, const FVector& Location) {
-			Label->SetWorldLocationAndRotation(Location, FRotationMatrix::MakeFromX(CameraLocation - Location).Rotator());
-		};
-
-		const int32 Boost = FMath::RoundToInt(GetCarBoost(I));
-		if (Boost != Car.ShownBoost)
-		{
-			Car.ShownBoost = Boost;
-			const FString Prefix = bFocus ? TEXT("> ") : TEXT("");
-			Car.Label->SetText(FText::FromString(FString::Printf(TEXT("%s%s  %d"), *Prefix, *Player.Name, Boost)));
-			Car.Label->SetWorldSize(bFocus ? 64.0f : 48.0f);
-		}
-		FaceCamera(Car.Label, CarLocation + FVector(0, 0, 130));
-
-		const int32 MomentIndex = FindMomentAt(Clock.GetTime(), I);
-		Car.MomentLabel->SetVisibility(MomentIndex != INDEX_NONE);
-		if (MomentIndex != INDEX_NONE)
-		{
-			const FRLMoment& M = Replay.Moments[MomentIndex];
-			const FString Text = M.bPunished && M.Kind != TEXT("conceded") && M.Kind != TEXT("caught_ahead")
-				? FString::Printf(TEXT("%s (punished)"), *M.Title)
-				: M.Title;
-			Car.MomentLabel->SetText(FText::FromString(Text));
-			Car.MomentLabel->SetTextRenderColor(RLShapes::Colors::SeverityColor(M.Severity));
-			FaceCamera(Car.MomentLabel, CarLocation + FVector(0, 0, 210));
-		}
-	}
 }
 
 void ARLReplayDirector::DrawBallTrail() const

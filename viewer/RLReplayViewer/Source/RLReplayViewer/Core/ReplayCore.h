@@ -266,6 +266,39 @@ inline CameraPose BallCam(const Vec3& Car, const Vec3& Ball, double Distance = 4
 	return Pose;
 }
 
+// Keep a camera inside the arena, as Rocket League's own camera does, so a
+// car near a wall can't put the camera behind it. The bounds are the side and
+// back walls (or the goal's back wall, inside a goal mouth), the 45 degree
+// corners and the ceiling, less a margin.
+inline Vec3 ClampToArena(Vec3 P, double Margin = 80.0)
+{
+	constexpr double HalfWidth = 4096.0;   // side walls, x
+	constexpr double HalfLength = 5120.0;  // back walls, y
+	constexpr double CornerCut = 1152.0;
+	constexpr double GoalHalfWidth = 892.755;
+	constexpr double GoalHeight = 642.775;
+	constexpr double GoalDepth = 880.0;
+	constexpr double Ceiling = 2044.0;
+
+	const bool bInGoalMouth = std::fabs(P.X) < GoalHalfWidth - Margin && P.Z < GoalHeight - Margin;
+	const double MaxX = HalfWidth - Margin;
+	const double MaxY = (bInGoalMouth ? HalfLength + GoalDepth : HalfLength) - Margin;
+	P.X = std::clamp(P.X, -MaxX, MaxX);
+	P.Y = std::clamp(P.Y, -MaxY, MaxY);
+	P.Z = std::clamp(P.Z, Margin, Ceiling - Margin);
+
+	// Corners: |x| + |y| may not pass the diagonal wall. Step back along its
+	// normal, splitting the excess between x and y.
+	const double Diagonal = HalfWidth + HalfLength - CornerCut - Margin * 1.41421356;
+	const double Excess = std::fabs(P.X) + std::fabs(P.Y) - Diagonal;
+	if (Excess > 0.0)
+	{
+		P.X -= std::copysign(Excess / 2.0, P.X);
+		P.Y -= std::copysign(Excess / 2.0, P.Y);
+	}
+	return P;
+}
+
 // Orbit camera around a target. Yaw and pitch in degrees, pitch above the horizon.
 inline CameraPose Orbit(const Vec3& Target, double YawDeg, double PitchDeg, double Distance)
 {

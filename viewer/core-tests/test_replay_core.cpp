@@ -195,6 +195,23 @@ static void TestCameras()
 	CHECK(Near(Clamped.Location.X, 0.0, 1e-6));
 }
 
+static void TestClampToArena()
+{
+	CHECK(Near(ClampToArena({100, -200, 500}), {100, -200, 500}));  // inside: untouched
+	CHECK(Near(ClampToArena({5000, 0, 300}), {4016, 0, 300}));      // beyond a side wall
+	CHECK(Near(ClampToArena({2000, 6000, 300}), {2000, 5040, 300}));  // behind a back wall
+	CHECK(Near(ClampToArena({0, 5800, 300}), {0, 5800, 300}));      // inside the goal is fine...
+	CHECK(Near(ClampToArena({0, 5800, 700}), {0, 5040, 700}));      // ...but not above the crossbar
+	CHECK(Near(ClampToArena({0, 0, 3000}).Z, 1964.0));
+	CHECK(Near(ClampToArena({0, 0, -50}).Z, 80.0));
+
+	// Past a corner: pushed back onto the diagonal wall, x and y equally.
+	const Vec3 Corner = ClampToArena({3900, 4900, 300});
+	CHECK(Near(Corner.X + Corner.Y, 4096 + 5120 - 1152 - 80 * 1.41421356, 1e-6));
+	CHECK(Near(3900 - Corner.X, 4900 - Corner.Y, 1e-9));
+	CHECK(Near(ClampToArena({-3900, -4900, 300}).X, -Corner.X, 1e-9));
+}
+
 int main()
 {
 	const std::vector<std::pair<const char*, std::function<void()>>> Tests = {
@@ -206,6 +223,7 @@ int main()
 		{"PlaybackClock", TestPlaybackClock},
 		{"MomentNavigation", TestMomentNavigation},
 		{"Cameras", TestCameras},
+		{"ClampToArena", TestClampToArena},
 	};
 	for (const auto& [Name, Test] : Tests)
 	{

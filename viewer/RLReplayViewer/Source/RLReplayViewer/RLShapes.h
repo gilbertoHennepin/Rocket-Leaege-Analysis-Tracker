@@ -47,18 +47,28 @@ inline FLinearColor Team(int32 TeamIndex)
 	return TeamIndex == 0 ? Blue : Orange;
 }
 
-// Coaching moment severity: "high" red, "medium" amber, anything else grey.
-inline FColor SeverityColor(const FString& Severity)
+// Lighter versions for text on the HUD's dark panels, chosen for at least
+// 4.5:1 contrast (WCAG AA) on those panels even over a white background.
+const FLinearColor BlueText = FLinearColor::FromSRGBColor(FColor(0x8C, 0xC2, 0xFF));
+const FLinearColor OrangeText = FLinearColor::FromSRGBColor(FColor(0xFF, 0xA8, 0x73));
+
+inline FLinearColor TeamText(int32 TeamIndex)
+{
+	return TeamIndex == 0 ? BlueText : OrangeText;
+}
+
+// Coaching moment severity, for text: "high" red, "medium" amber, anything else grey.
+inline FLinearColor SeverityText(const FString& Severity)
 {
 	if (Severity == TEXT("high"))
 	{
-		return FColor(0xE3, 0x49, 0x48);
+		return FLinearColor::FromSRGBColor(FColor(0xFF, 0x9A, 0x90));
 	}
 	if (Severity == TEXT("medium"))
 	{
-		return FColor(0xED, 0xA1, 0x00);
+		return FLinearColor::FromSRGBColor(FColor(0xFF, 0xC2, 0x33));
 	}
-	return FColor(0xC3, 0xC2, 0xB7);
+	return FLinearColor::FromSRGBColor(FColor(0xCF, 0xCD, 0xC4));
 }
 }  // namespace Colors
 }  // namespace RLShapes

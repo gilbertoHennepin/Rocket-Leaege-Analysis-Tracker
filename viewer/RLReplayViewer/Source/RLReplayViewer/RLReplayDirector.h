@@ -7,9 +7,7 @@
 
 #include "RLReplayDirector.generated.h"
 
-class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
-class UTextRenderComponent;
 
 // Owns the loaded match and the playback clock, and moves the ball and car
 // visuals to match the current replay time every frame.
@@ -45,26 +43,19 @@ public:
 	void JumpToPreviousMoment();
 	int32 GetActiveMoment() const { return ActiveMoment; }
 
+	// The most recent moment whose on-screen window contains Time, for one
+	// player (or anyone, with INDEX_NONE).
+	int32 FindMomentAt(double Time, int32 PlayerIndex) const;
+
 	static constexpr double MomentLeadIn = 2.5;  // seconds shown before a moment
 
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
-	struct FCarVisual
-	{
-		USceneComponent* Root = nullptr;
-		UStaticMeshComponent* Body = nullptr;
-		UTextRenderComponent* Label = nullptr;
-		UTextRenderComponent* MomentLabel = nullptr;
-		int32 ShownBoost = -1;
-	};
-
 	void ClearVisuals();
 	void BuildVisuals();
 	void UpdateVisuals();
-	void UpdateLabels(const FVector& CameraLocation);
 	void DrawBallTrail() const;
-	int32 FindMomentAt(double Time, int32 PlayerIndex) const;
 
 	FRLReplay Replay;
 	std::vector<double> MomentTimes;
@@ -80,5 +71,6 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<USceneComponent>> SpawnedComponents;
 
-	TArray<FCarVisual> Cars;
+	// One root per car, moved every frame; the body and nose hang off it.
+	TArray<USceneComponent*> Cars;
 };
