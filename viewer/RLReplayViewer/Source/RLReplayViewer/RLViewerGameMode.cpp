@@ -14,6 +14,7 @@
 #include "Misc/Paths.h"
 #include "RLArena.h"
 #include "RLDemoCapture.h"
+#include "RLLiveCapture.h"
 #include "RLReplayDirector.h"
 #include "RLReplayViewer.h"
 #include "RLViewerPawn.h"
@@ -65,6 +66,13 @@ void ARLViewerGameMode::BeginPlay()
 	if (FParse::Value(CommandLine, TEXT("Live="), LivePort) || FParse::Param(CommandLine, TEXT("Live")))
 	{
 		StartLive();
+		// -LiveCapture="/folder" saves live mode screenshots once a stream arrives, then quits.
+		FString LiveCaptureDir;
+		if (FParse::Value(CommandLine, TEXT("LiveCapture="), LiveCaptureDir))
+		{
+			ARLViewerPawn* Pawn = Cast<ARLViewerPawn>(UGameplayStatics::GetPlayerPawn(this, 0));
+			World->SpawnActor<ARLLiveCapture>()->Start(Director, Pawn, LiveCaptureDir);
+		}
 		return;
 	}
 

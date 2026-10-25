@@ -42,7 +42,9 @@ To open a specific file, launch with `-RLReplay="C:/path/to/match.rlview.json"`.
 
 To watch a match live, launch with `-Live` (or click **Listen for a live
 match**) and run `rltracker stream`. The match streams over UDP and plays as
-it arrives; see [docs/telemetry.md](../docs/telemetry.md).
+it arrives; see [docs/telemetry.md](../docs/telemetry.md). Add
+`-LiveCapture="/abs/folder"` to have it save screenshots of live mode by itself
+and log the link stats and playback smoothness every second, then quit.
 
 To run the automation tests in the editor: **Tools > Session Frontend >
 Automation**, filter `RLReplayViewer`, run.
