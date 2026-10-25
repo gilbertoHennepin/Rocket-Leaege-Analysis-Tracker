@@ -14,10 +14,10 @@ from pathlib import Path
 from . import __version__
 from .aerial import Aerial, aerial_summary, find_aerials
 from .coach import Report, coach, report_to_dict
+from .dashboard import write_dashboard
 from .discovery import REPLAY_DIR_ENV, default_replay_dir, find_replays
 from .export import export_match
 from .models import Match, Player, Team
-from .moments import Moment
 from .parser import DEFAULT_FPS, ReplayParseError, parse_replay
 from .stats import player_stats, stats_table
 from .viewer_export import export_viewer
@@ -301,13 +301,6 @@ def _pick_players(match: Match, args: argparse.Namespace) -> list[Player]:
     return list(match.players)
 
 
-def _format_moment(match: Match, moment: Moment) -> str:
-    clock = match.game_time_label(moment.time)
-    # Conceded goals and shots you were caught ahead for are punished by definition.
-    show = moment.punished and moment.kind not in ("conceded", "caught_ahead")
-    return f"{clock} (punished)" if show else clock
-
-
 def format_report(match: Match, report: Report) -> str:
     p = report.player
     lines = [f"Coaching report: {p.name} ({p.team.label})", ""]
@@ -319,7 +312,7 @@ def format_report(match: Match, report: Report) -> str:
             lines += [f"     {line}" for line in textwrap.wrap("Tip: " + insight.tip, 88)]
             if insight.moments:
                 shown = insight.moments[:6]
-                when = ", ".join(_format_moment(match, m) for m in shown)
+                when = ", ".join(m.label(match) for m in shown)
                 more = f" and {len(insight.moments) - len(shown)} more" if len(insight.moments) > len(shown) else ""
                 lines += [f"     {line}" for line in textwrap.wrap(f"When (clock): {when}{more}", 88)]
             lines.append("")
@@ -348,6 +341,21 @@ def _cmd_coach(args: argparse.Namespace) -> int:
             print(f"  Saved {out}")
 
     return _run_per_match(args, handle)
+
+
+def _cmd_dashboard(args: argparse.Namespace) -> int:
+    matches = [m for m in _parsed_matches(args) if m is not None]
+    if not matches:
+        return 1
+    name = args.player or os.environ.get(PLAYER_ENV)
+    path, entries, skipped = write_dashboard(matches, args.out, name, heatmaps=not args.no_heatmaps)
+    if not entries:
+        print(f"error: {name!r} isn't in any of these matches", file=sys.stderr)
+        return 1
+    for match in skipped:
+        print(f"  Left out {match.source.name}: {name!r} isn't in it")
+    print(f"Wrote {path} ({len(entries)} matches). Open it in a browser.")
+    return 0
 
 
 def _cmd_viewer(args: argparse.Namespace) -> int:
@@ -392,6 +400,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_coach.add_argument("--all", action="store_true", help="Show reports for every player")
     p_coach.add_argument("--json", type=Path, help="Also save every player's report as JSON in this folder")
     p_coach.set_defaults(func=_cmd_coach)
+
+    p_dash = sub.add_parser("dashboard", help="Write a session review page (HTML) for your recent matches")
+    _add_replay_args(p_dash)
+    p_dash.set_defaults(latest=10)
+    p_dash.add_argument("--player", help=f"Whose dashboard (default: ${PLAYER_ENV}, else each replay's owner)")
+    p_dash.add_argument("--out", type=Path, default=Path("rltracker-dashboard.html"), help="Output file")
+    p_dash.add_argument("--no-heatmaps", action="store_true", help="Leave out heat maps (faster, smaller file)")
+    p_dash.set_defaults(func=_cmd_dashboard)
 
     p_view = sub.add_parser("viewer-export", help="Export matches for the Unreal 3D replay viewer")
     _add_replay_args(p_view)
