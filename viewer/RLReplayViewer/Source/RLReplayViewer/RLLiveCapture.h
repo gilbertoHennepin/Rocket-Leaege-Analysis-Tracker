@@ -37,7 +37,9 @@ private:
 	{
 		WaitingForMatch,
 		Playing,
+		Pausing,    // the live-edge screenshot is being written; pause after it
 		Paused,
+		GoingLive,  // the paused screenshot is being written; go live after it
 		Rejoined,
 		Finishing,  // the last screenshot is being written
 		Done,

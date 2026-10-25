@@ -125,19 +125,27 @@ void ARLLiveCapture::Tick(float DeltaSeconds)
 		if (PhaseSeconds >= PlayBeforeFirstShot)
 		{
 			Capture(TEXT("viewer-live.png"));
-			Director->GetClock().Pause();  // as Space does
-			Phase = EPhase::Paused;
-			PhaseSeconds = 0.0;
+			Phase = EPhase::Pausing;
 		}
+		break;
+	// A screenshot is taken when the frame is drawn, after this tick, so what
+	// is on screen only changes once the last one has been written.
+	case EPhase::Pausing:
+		Director->GetClock().Pause();  // as Space does
+		Phase = EPhase::Paused;
+		PhaseSeconds = 0.0;
 		break;
 	case EPhase::Paused:
 		if (PhaseSeconds >= PausedFor)
 		{
 			Capture(TEXT("viewer-live-behind.png"));
-			Director->GoLive();  // as L does
-			Phase = EPhase::Rejoined;
-			PhaseSeconds = 0.0;
+			Phase = EPhase::GoingLive;
 		}
+		break;
+	case EPhase::GoingLive:
+		Director->GoLive();  // as L does
+		Phase = EPhase::Rejoined;
+		PhaseSeconds = 0.0;
 		break;
 	case EPhase::Rejoined:
 		if (PhaseSeconds >= RejoinFor)

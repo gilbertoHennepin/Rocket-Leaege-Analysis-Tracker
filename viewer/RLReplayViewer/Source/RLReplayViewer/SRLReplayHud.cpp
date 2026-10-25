@@ -512,23 +512,46 @@ TSharedRef<SWidget> SRLReplayHud::MakeRightPanel()
 			Heading(LOCTEXT("Moments", "COACHING MOMENTS  (N / P)"))
 		];
 
-	if (Replay.Moments.Num() == 0)
-	{
-		Box->AddSlot().AutoHeight()
-		[
-			SNew(STextBlock)
-				.Text(LOCTEXT("NoMoments", "No coaching moments in this match."))
-				.Font(Font(11))
-				.ColorAndOpacity(MutedText)
-		];
-	}
-	else
-	{
-		Box->AddSlot().AutoHeight()
-		[
-			SNew(SBox).MaxDesiredHeight(520.0f)[List]
-		];
-	}
+	// Said when nothing is listed: no moments at all, none yet (live), or none
+	// for the player being followed.
+	Box->AddSlot().AutoHeight()
+	[
+		SNew(STextBlock)
+			.Visibility_Lambda([WeakDirector]() {
+				if (!WeakDirector.IsValid())
+				{
+					return EVisibility::Collapsed;
+				}
+				const FRLReplay& R = WeakDirector->GetReplay();
+				const int32 Focus = WeakDirector->GetFocusPlayer();
+				const bool bAny = R.Moments.ContainsByPredicate(
+					[&R, Focus](const FRLMoment& M) { return Focus == INDEX_NONE || R.FindPlayer(M.PlayerId) == Focus; });
+				return bAny ? EVisibility::Collapsed : EVisibility::Visible;
+			})
+			.Text_Lambda([WeakDirector]() {
+				if (!WeakDirector.IsValid())
+				{
+					return FText::GetEmpty();
+				}
+				const FRLReplay& R = WeakDirector->GetReplay();
+				const int32 Focus = WeakDirector->GetFocusPlayer();
+				const bool bLive = WeakDirector->IsLive();
+				if (R.Players.IsValidIndex(Focus) && R.Moments.Num() > 0)
+				{
+					return FText::Format(LOCTEXT("NoMomentsFor", "None for {0}{1}. Press 0 to see everyone's."),
+						FText::FromString(R.Players[Focus].Name), bLive ? LOCTEXT("Yet", " yet") : FText::GetEmpty());
+				}
+				return bLive ? LOCTEXT("NoMomentsYet", "None yet. They appear here as the match is played.")
+							 : LOCTEXT("NoMoments", "No coaching moments in this match.");
+			})
+			.Font(Font(11))
+			.ColorAndOpacity(MutedText)
+			.AutoWrapText(true)
+	];
+	Box->AddSlot().AutoHeight()
+	[
+		SNew(SBox).MaxDesiredHeight(520.0f)[List]
+	];
 
 	return SNew(SBox).WidthOverride(320.0f)[Panel(Box)];
 }
