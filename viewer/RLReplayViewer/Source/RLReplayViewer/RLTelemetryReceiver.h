@@ -21,6 +21,8 @@ public:
 		TArray<uint8> Bytes;
 	};
 
+	// Both defined in the .cpp, where FUdpSocketReceiver is a complete type.
+	FRLTelemetryReceiver();
 	~FRLTelemetryReceiver();
 
 	// Listen on Host:Port: 127.0.0.1 for this computer only, 0.0.0.0 for any.

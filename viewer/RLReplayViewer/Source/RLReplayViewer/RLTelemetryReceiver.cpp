@@ -8,6 +8,8 @@
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 
+FRLTelemetryReceiver::FRLTelemetryReceiver() = default;
+
 FRLTelemetryReceiver::~FRLTelemetryReceiver()
 {
 	Stop();
